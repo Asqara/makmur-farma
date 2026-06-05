@@ -18,6 +18,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:rollback": "drizzle-kit rollback",
     "db:seed": "bun run src/seed.ts",
+    "worker": "bun run src/worker.ts",
     "test": "vitest run"
   },
   "dependencies": {

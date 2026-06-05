@@ -15,9 +15,11 @@ PostgreSQL adalah sumber kebenaran untuk user, session, token verifikasi email, 
 APP_PUBLIC_URL
 NEXT_PUBLIC_APP_URL
 APP_URL
+APP_TIMEZONE=Asia/Jakarta
 ```
 
 `APP_PUBLIC_URL` digunakan untuk membuat tautan verifikasi email. `NEXT_PUBLIC_APP_URL` digunakan oleh metadata/client fallback.
+`APP_TIMEZONE` digunakan untuk agregasi dashboard dan format periode operasional server-side.
 
 ## Auth
 
@@ -75,3 +77,8 @@ CLOUDFLARE_R2_BUCKET
 CLOUDFLARE_R2_PUBLIC_URL
 CLOUDFLARE_R2_ENDPOINT
 ```
+
+## Modul 2-5
+
+Schema source sudah menyiapkan tabel untuk dashboard, katalog obat, batch stok, order, resep, pembayaran, notifikasi, report, import, job, dan error log.
+Migration SQL belum digenerate atau diaplikasikan karena membutuhkan persetujuan eksplisit sesuai `@AGENTS.md`.

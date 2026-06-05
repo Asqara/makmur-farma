@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 
+import { client } from "@/client";
 import { requirePermission, requireSession } from "./middlewares/session";
 
 /**
@@ -7,18 +8,13 @@ import { requirePermission, requireSession } from "./middlewares/session";
  */
 export const notificationsApi = new Elysia().get(
   "/api/notifications",
-  async ({ request }) => {
+  async ({ request, query }) => {
     const session = await requireSession(request);
     requirePermission(session, "notification.read");
 
-    return {
-      data: [],
-      pagination: {
-        limit: 5,
-        page: 1,
-        total: 0,
-        totalPages: 0,
-      },
-    };
+    return client.notifications.list(query as Record<string, unknown>, {
+      role: session.user.role,
+      userId: session.userId,
+    });
   },
 );

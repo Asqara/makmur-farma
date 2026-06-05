@@ -1,7 +1,6 @@
 "use client";
 
 import { LogOut } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 
@@ -9,7 +8,6 @@ import { BrandLogo } from "@/components/ui";
 import { APP_META_DESCRIPTION, APP_NAME } from "@/constants/app";
 import { ROUTES } from "@/constants/routes";
 import { useLogoutMutation } from "@/hooks/useAuth";
-import { toast } from "@/components/ui/toast";
 
 /**
  * Logout page revokes the active session.
@@ -17,25 +15,18 @@ import { toast } from "@/components/ui/toast";
 export default function LogoutPage() {
   const hasSubmitted = useRef(false);
   const logout = useLogoutMutation();
-  const router = useRouter();
 
   useEffect(() => {
-    if (hasSubmitted.current) {
-      return;
-    }
-
+    if (hasSubmitted.current) return;
     hasSubmitted.current = true;
-    if (!logout.isPending) {
-      if (logout.error) {
-        toast.error("Gagal menghapus session. Silakan coba lagi.");
-      }
-      logout.mutate(undefined, {
-        onSettled: () => {
-          router.replace(`${ROUTES.LOGIN}?reason=logout`);
-        },
-      });
-    }
-  }, [logout, router]);
+
+    logout.mutate(undefined, {
+      onSettled: () => {
+        window.location.replace(`${ROUTES.LOGIN}?reason=logout`);
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main className="grid min-h-screen place-items-center bg-page-background p-6">

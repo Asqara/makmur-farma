@@ -1,0 +1,2 @@
+[resolve]
+alias = { "server-only" = "./src/test/server-only.ts" }

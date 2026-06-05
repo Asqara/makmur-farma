@@ -25,10 +25,10 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   AppShell,
@@ -88,6 +88,7 @@ function getTitle(pathname: string) {
   if (pathname === ROUTES.NOTIFICATIONS) return "Notifikasi";
   if (pathname === ROUTES.AUDIT_LOGS) return "Audit Log";
   if (pathname === ROUTES.ERROR_LOGS) return "Error Log";
+  if (pathname === ROUTES.JOBS) return "Job";
   if (pathname === ROUTES.MONITORING) return "Monitoring";
   if (pathname === ROUTES.USERS) return "Pengguna";
   if (pathname === ROUTES.SETTINGS) return "Pengaturan";
@@ -299,8 +300,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const auth = useAuth();
   const pathname = usePathname();
-  const queryClient = useQueryClient();
-  const router = useRouter();
 
   const user = auth.data?.user;
   const isSessionExpired = auth.isError && isUnauthorizedError(auth.error);
@@ -473,6 +472,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         icon: <BarChart3 />,
         label: "Monitoring",
       });
+
+      systemItems.push({
+        active: pathname === ROUTES.JOBS,
+        href: ROUTES.JOBS,
+        icon: <Activity />,
+        label: "Job",
+      });
     }
 
     if (hasPermission(user.role, "user.read")) {
@@ -574,12 +580,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     </Button>
   );
 
-  useEffect(() => {
-    if (isSessionExpired) {
-      queryClient.removeQueries({ queryKey: ["auth"] });
-      router.replace(`${ROUTES.LOGIN}?reason=session-expired`);
-    }
-  }, [isSessionExpired, queryClient, router]);
 
   if (auth.isLoading || isSessionExpired) {
     return (

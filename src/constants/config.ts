@@ -28,6 +28,7 @@ export const ENV = {
     process.env.NEXT_PUBLIC_APP_URL ??
     process.env.APP_URL ??
     "http://localhost:3000",
+  appTimezone: process.env.APP_TIMEZONE ?? "Asia/Jakarta",
   databaseUrl:
     process.env.DATABASE_URL ??
     "postgres://user:pass@localhost:5432/makmur_farma",

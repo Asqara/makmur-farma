@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1779764168571,
-      "tag": "0000_fine_micromacro",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1779785389137,
-      "tag": "0001_pink_golden_guardian",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1779799753845,
-      "tag": "0002_fuzzy_zaran",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1779809118842,
-      "tag": "0003_secret_quentin_quire",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1779853727508,
-      "tag": "0004_certain_fabian_cortez",
+      "when": 1780681294571,
+      "tag": "0000_fuzzy_lockjaw",
       "breakpoints": true
     }
   ]

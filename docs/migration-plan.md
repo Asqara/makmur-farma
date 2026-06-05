@@ -90,3 +90,75 @@ pnpm db:migrate
 ```
 
 No schema push should be used.
+
+## Modul 2-5 Schema Source Update
+
+Status: schema source has been extended in `@src/drizzle-schema/index.ts`; migration SQL has not been generated or applied.
+
+New PostgreSQL objects expected by the current source:
+
+- Enums:
+  - `medicine_status`
+  - `batch_status`
+  - `stock_movement_type`
+  - `order_channel`
+  - `order_status`
+  - `prescription_status`
+  - `payment_status`
+  - `payment_method`
+  - `job_status`
+  - `job_type`
+  - `import_row_status`
+  - `error_severity`
+- Tables:
+  - `customer_profiles`
+  - `medicine_categories`
+  - `suppliers`
+  - `medicines`
+  - `medicine_images`
+  - `medicine_batches`
+  - `carts`
+  - `cart_items`
+  - `orders`
+  - `order_items`
+  - `order_status_history`
+  - `prescriptions`
+  - `prescription_reviews`
+  - `stock_reservations`
+  - `stock_movements`
+  - `payments`
+  - `payment_events`
+  - `report_runs`
+  - `import_runs`
+  - `import_row_results`
+  - `job_runs`
+  - `application_errors`
+- Existing table changes:
+  - `notifications.dedupe_key`
+  - `notifications.delivery_status`
+  - `notifications.email_status`
+
+Data safety notes:
+
+- Stock is batch-based; no medicine-level editable stock number is introduced.
+- Opening stock from seed uses `IMPORT_OPENING` stock movements.
+- Prescription file metadata is stored separately from prescription reviews.
+- Payment status and order status remain separate.
+- Job/report/import status is persisted in PostgreSQL; Redis queue state must not become business truth.
+
+Index notes:
+
+- Lookup and filter indexes are defined for status, created time, foreign keys, code/slug, order number, provider reference, job key, and import row identity.
+- Unique constraints cover medicine/category/supplier codes, medicine slug, order number, provider reference, idempotency keys, batch number per medicine, and notification dedupe key.
+
+Compatibility notes:
+
+- This is a forward schema expansion. Existing Modul 1 auth tables remain in place.
+- Historical deleted migration files in the current worktree must be reviewed before generation to avoid accidental migration history loss.
+- `pnpm db:generate` should be reviewed before `pnpm db:migrate`.
+
+Rollback / forward-fix:
+
+- Prefer forward-fix migrations for enum/table changes.
+- If generated SQL conflicts with existing database history, stop before apply and reconcile migration metadata.
+- Do not use schema push.

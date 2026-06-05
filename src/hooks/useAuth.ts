@@ -158,11 +158,10 @@ export function useLogoutMutation() {
     mutationFn: async () => {
       const response = await eden.api.v1.auth.logout.post({});
 
-      if (response.error) {
+      // 401 means the session was already expired — treat as already logged out.
+      if (response.error && !isUnauthorizedError(response.error)) {
         throw response.error;
       }
-
-      return response.data;
     },
     onSettled: () => {
       queryClient.removeQueries({ queryKey: AUTH_QUERY_KEY });

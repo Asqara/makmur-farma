@@ -48,6 +48,10 @@ export const ROUTES = {
 
   // Customer
   ACCOUNT: "/account",
+  CATALOG: {
+    DETAIL: (slug: string) => `/catalog/${slug}`,
+    INDEX: "/catalog",
+  },
   CUSTOMERS: "/customers",
 
   // Reports
@@ -62,6 +66,7 @@ export const ROUTES = {
   NOTIFICATIONS: "/notifications",
   AUDIT_LOGS: "/audit-logs",
   ERROR_LOGS: "/error-logs",
+  JOBS: "/jobs",
   MONITORING: "/monitoring",
   USERS: "/users",
   SETTINGS: "/settings",

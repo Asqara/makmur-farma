@@ -1,0 +1,696 @@
+import "server-only";
+
+import { asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+
+import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
+import { canTransitionOrder } from "@/constants/domain";
+import type {
+  OrderChannel,
+  OrderStatus,
+  PaymentStatus,
+  PrescriptionStatus,
+} from "@/constants/domain";
+import {
+  auditLogs,
+  medicines,
+  notifications,
+  orderItems,
+  orderStatusHistory,
+  orders,
+  payments,
+  prescriptionReviews,
+  prescriptions,
+  users,
+} from "@/drizzle-schema";
+import { db, readDb } from "@/lib/db";
+import { NotFoundAppError, ValidationAppError } from "@/lib/errors";
+import type { RequestContext } from "@/lib/request";
+import type { PrescriptionReviewInput } from "@/zod-schemas";
+
+import {
+  buildPagination,
+  buildTextSearch,
+  combineConditions,
+  countSql,
+  getListFilters,
+  toString,
+  type ListResponse,
+} from "./list-utils";
+import { assertOrderTransition } from "./order-rules";
+
+const ORDER_SORT_FIELDS = {
+  createdAt: orders.createdAt,
+  grandTotal: orders.grandTotal,
+  orderNumber: orders.orderNumber,
+  status: orders.status,
+} as const;
+
+const PAYMENT_SORT_FIELDS = {
+  amount: payments.amount,
+  createdAt: payments.createdAt,
+  status: payments.status,
+} as const;
+
+const PRESCRIPTION_SORT_FIELDS = {
+  createdAt: prescriptions.createdAt,
+  submittedAt: prescriptions.submittedAt,
+  status: prescriptions.status,
+} as const;
+
+export type OrderListItem = {
+  channel: OrderChannel;
+  createdAt: Date;
+  customer: {
+    email: string | null;
+    id: string | null;
+    name: string | null;
+  };
+  grandTotal: string;
+  id: string;
+  itemCount: number;
+  orderNumber: string;
+  prescriptionRequired: boolean;
+  status: OrderStatus;
+};
+
+export type PaymentListItem = {
+  amount: string;
+  createdAt: Date;
+  id: string;
+  method: string;
+  order: {
+    id: string;
+    orderNumber: string;
+  };
+  provider: string;
+  providerReference: string | null;
+  status: PaymentStatus;
+};
+
+export type PrescriptionListItem = {
+  createdAt: Date;
+  customer: {
+    email: string | null;
+    id: string;
+    name: string | null;
+  };
+  id: string;
+  order: {
+    id: string;
+    orderNumber: string;
+    status: OrderStatus;
+  };
+  originalFileName: string;
+  status: PrescriptionStatus;
+  submittedAt: Date;
+};
+
+export type TransitionOrderInput = {
+  actorRole: UserRole;
+  actorUserId: string;
+  nextStatus: OrderStatus;
+  note?: string;
+  orderId: string;
+  requestContext: RequestContext;
+};
+
+export type ReviewPrescriptionServiceInput = {
+  actorRole: UserRole;
+  actorUserId: string;
+  input: PrescriptionReviewInput;
+  prescriptionId: string;
+  requestContext: RequestContext;
+};
+
+export type OrderDetail = OrderListItem & {
+  items: Array<{
+    id: string;
+    medicine: {
+      code: string;
+      id: string;
+      name: string;
+    };
+    prescriptionRequired: boolean;
+    quantity: number;
+    subtotal: string;
+    unitPrice: string;
+  }>;
+  payments: PaymentListItem[];
+  prescriptions: PrescriptionListItem[];
+  statusHistory: Array<{
+    actorName: string | null;
+    createdAt: Date;
+    fromStatus: OrderStatus | null;
+    id: string;
+    note: string | null;
+    toStatus: OrderStatus;
+  }>;
+};
+
+/**
+ * Order, prescription, and payment workflow service.
+ */
+export class OrdersClient {
+  async listOrders(
+    searchParams: Record<string, unknown>,
+  ): Promise<ListResponse<OrderListItem>> {
+    const filters = getListFilters(searchParams);
+    const conditions = [];
+    const id = toString(filters.where.id);
+    const status = toString(filters.where.status) as OrderStatus | undefined;
+    const channel = toString(filters.where.channel) as OrderChannel | undefined;
+    const dateFrom = toString(filters.where.dateFrom);
+    const dateTo = toString(filters.where.dateTo);
+    const searchCondition = buildTextSearch(filters.search, [
+      orders.orderNumber,
+      users.fullName,
+      users.email,
+    ]);
+
+    if (id) conditions.push(eq(orders.id, id));
+    if (status) conditions.push(eq(orders.status, status));
+    if (channel) conditions.push(eq(orders.channel, channel));
+    if (dateFrom) conditions.push(gte(orders.createdAt, new Date(dateFrom)));
+    if (dateTo) conditions.push(lte(orders.createdAt, new Date(dateTo)));
+    if (searchCondition) conditions.push(searchCondition);
+
+    const whereClause = combineConditions(conditions);
+    const sortBy =
+      filters.sortBy && filters.sortBy in ORDER_SORT_FIELDS
+        ? filters.sortBy
+        : "createdAt";
+    const sortColumn =
+      ORDER_SORT_FIELDS[sortBy as keyof typeof ORDER_SORT_FIELDS];
+    const orderBy = filters.sortDir === "asc" ? asc(sortColumn) : desc(sortColumn);
+    const offset = (filters.page - 1) * filters.limit;
+
+    let countQuery = readDb
+      .select({ total: countSql() })
+      .from(orders)
+      .leftJoin(users, eq(orders.customerUserId, users.id))
+      .$dynamic();
+    if (whereClause) countQuery = countQuery.where(whereClause);
+    const [countRow] = await countQuery;
+    const total = Number(countRow?.total ?? 0);
+
+    let listQuery = readDb
+      .select({
+        channel: orders.channel,
+        createdAt: orders.createdAt,
+        customerEmail: users.email,
+        customerId: users.id,
+        customerName: users.fullName,
+        grandTotal: orders.grandTotal,
+        id: orders.id,
+        itemCount: sql<number>`coalesce((
+          select count(*)
+          from order_items oi
+          where oi.order_id = ${orders.id}
+        ), 0)`,
+        orderNumber: orders.orderNumber,
+        prescriptionRequired: orders.prescriptionRequired,
+        status: orders.status,
+      })
+      .from(orders)
+      .leftJoin(users, eq(orders.customerUserId, users.id))
+      .orderBy(orderBy)
+      .limit(filters.limit)
+      .offset(offset)
+      .$dynamic();
+    if (whereClause) listQuery = listQuery.where(whereClause);
+    const rows = await listQuery;
+
+    return {
+      data: rows.map((row) => ({
+        channel: row.channel,
+        createdAt: row.createdAt,
+        customer: {
+          email: row.customerEmail ?? null,
+          id: row.customerId ?? null,
+          name: row.customerName ?? null,
+        },
+        grandTotal: row.grandTotal,
+        id: row.id,
+        itemCount: Number(row.itemCount ?? 0),
+        orderNumber: row.orderNumber,
+        prescriptionRequired: row.prescriptionRequired,
+        status: row.status,
+      })),
+      pagination: buildPagination(total, filters.page, filters.limit),
+    };
+  }
+
+  async getOrderDetail(id: string): Promise<OrderDetail> {
+    const orderResult = await this.listOrders({ id, limit: "1", page: "1" });
+    const order = orderResult.data.find((item) => item.id === id);
+
+    if (!order) {
+      throw new NotFoundAppError("Pesanan tidak ditemukan.");
+    }
+
+    const [items, paymentResult, prescriptionResult, history] = await Promise.all([
+      readDb
+        .select({
+          id: orderItems.id,
+          medicineCode: medicines.code,
+          medicineId: medicines.id,
+          medicineName: medicines.name,
+          prescriptionRequired: orderItems.prescriptionRequired,
+          quantity: orderItems.quantity,
+          subtotal: orderItems.subtotal,
+          unitPrice: orderItems.unitPrice,
+        })
+        .from(orderItems)
+        .innerJoin(medicines, eq(orderItems.medicineId, medicines.id))
+        .where(eq(orderItems.orderId, id)),
+      this.listPayments({ orderId: id, limit: "50", page: "1" }),
+      this.listPrescriptions({ orderId: id, limit: "50", page: "1" }),
+      readDb
+        .select({
+          actorName: users.fullName,
+          createdAt: orderStatusHistory.createdAt,
+          fromStatus: orderStatusHistory.fromStatus,
+          id: orderStatusHistory.id,
+          note: orderStatusHistory.note,
+          toStatus: orderStatusHistory.toStatus,
+        })
+        .from(orderStatusHistory)
+        .leftJoin(users, eq(orderStatusHistory.actorUserId, users.id))
+        .where(eq(orderStatusHistory.orderId, id))
+        .orderBy(asc(orderStatusHistory.createdAt)),
+    ]);
+
+    return {
+      ...order,
+      items: items.map((item) => ({
+        id: item.id,
+        medicine: {
+          code: item.medicineCode,
+          id: item.medicineId,
+          name: item.medicineName,
+        },
+        prescriptionRequired: item.prescriptionRequired,
+        quantity: item.quantity,
+        subtotal: item.subtotal,
+        unitPrice: item.unitPrice,
+      })),
+      payments: paymentResult.data,
+      prescriptions: prescriptionResult.data,
+      statusHistory: history.map((item) => ({
+        actorName: item.actorName ?? null,
+        createdAt: item.createdAt,
+        fromStatus: item.fromStatus ?? null,
+        id: item.id,
+        note: item.note ?? null,
+        toStatus: item.toStatus,
+      })),
+    };
+  }
+
+  async listPayments(
+    searchParams: Record<string, unknown>,
+  ): Promise<ListResponse<PaymentListItem>> {
+    const filters = getListFilters(searchParams);
+    const conditions = [];
+    const orderId = toString(filters.where.orderId);
+    const status = toString(filters.where.status) as PaymentStatus | undefined;
+    const searchCondition = buildTextSearch(filters.search, [
+      orders.orderNumber,
+      payments.provider,
+      payments.providerReference,
+    ]);
+
+    if (orderId) conditions.push(eq(payments.orderId, orderId));
+    if (status) conditions.push(eq(payments.status, status));
+    if (searchCondition) conditions.push(searchCondition);
+
+    const whereClause = combineConditions(conditions);
+    const sortBy =
+      filters.sortBy && filters.sortBy in PAYMENT_SORT_FIELDS
+        ? filters.sortBy
+        : "createdAt";
+    const sortColumn =
+      PAYMENT_SORT_FIELDS[sortBy as keyof typeof PAYMENT_SORT_FIELDS];
+    const orderBy = filters.sortDir === "asc" ? asc(sortColumn) : desc(sortColumn);
+    const offset = (filters.page - 1) * filters.limit;
+
+    let countQuery = readDb
+      .select({ total: countSql() })
+      .from(payments)
+      .innerJoin(orders, eq(payments.orderId, orders.id))
+      .$dynamic();
+    if (whereClause) countQuery = countQuery.where(whereClause);
+    const [countRow] = await countQuery;
+    const total = Number(countRow?.total ?? 0);
+
+    let listQuery = readDb
+      .select({
+        amount: payments.amount,
+        createdAt: payments.createdAt,
+        id: payments.id,
+        method: payments.method,
+        orderId: orders.id,
+        orderNumber: orders.orderNumber,
+        provider: payments.provider,
+        providerReference: payments.providerReference,
+        status: payments.status,
+      })
+      .from(payments)
+      .innerJoin(orders, eq(payments.orderId, orders.id))
+      .orderBy(orderBy)
+      .limit(filters.limit)
+      .offset(offset)
+      .$dynamic();
+    if (whereClause) listQuery = listQuery.where(whereClause);
+    const rows = await listQuery;
+
+    return {
+      data: rows.map((row) => ({
+        amount: row.amount,
+        createdAt: row.createdAt,
+        id: row.id,
+        method: row.method,
+        order: {
+          id: row.orderId,
+          orderNumber: row.orderNumber,
+        },
+        provider: row.provider,
+        providerReference: row.providerReference ?? null,
+        status: row.status,
+      })),
+      pagination: buildPagination(total, filters.page, filters.limit),
+    };
+  }
+
+  async listPrescriptions(
+    searchParams: Record<string, unknown>,
+  ): Promise<ListResponse<PrescriptionListItem>> {
+    const filters = getListFilters(searchParams);
+    const conditions = [];
+    const orderId = toString(filters.where.orderId);
+    const id = toString(filters.where.id);
+    const status = toString(filters.where.status) as
+      | PrescriptionStatus
+      | undefined;
+    const searchCondition = buildTextSearch(filters.search, [
+      prescriptions.originalFileName,
+      orders.orderNumber,
+      users.fullName,
+      users.email,
+    ]);
+
+    if (id) conditions.push(eq(prescriptions.id, id));
+    if (orderId) conditions.push(eq(prescriptions.orderId, orderId));
+    if (status) conditions.push(eq(prescriptions.status, status));
+    if (searchCondition) conditions.push(searchCondition);
+
+    const whereClause = combineConditions(conditions);
+    const sortBy =
+      filters.sortBy && filters.sortBy in PRESCRIPTION_SORT_FIELDS
+        ? filters.sortBy
+        : "submittedAt";
+    const sortColumn =
+      PRESCRIPTION_SORT_FIELDS[
+        sortBy as keyof typeof PRESCRIPTION_SORT_FIELDS
+      ];
+    const orderBy = filters.sortDir === "asc" ? asc(sortColumn) : desc(sortColumn);
+    const offset = (filters.page - 1) * filters.limit;
+
+    let countQuery = readDb
+      .select({ total: countSql() })
+      .from(prescriptions)
+      .innerJoin(orders, eq(prescriptions.orderId, orders.id))
+      .innerJoin(users, eq(prescriptions.customerUserId, users.id))
+      .$dynamic();
+    if (whereClause) countQuery = countQuery.where(whereClause);
+    const [countRow] = await countQuery;
+    const total = Number(countRow?.total ?? 0);
+
+    let listQuery = readDb
+      .select({
+        createdAt: prescriptions.createdAt,
+        customerEmail: users.email,
+        customerId: users.id,
+        customerName: users.fullName,
+        id: prescriptions.id,
+        orderId: orders.id,
+        orderNumber: orders.orderNumber,
+        orderStatus: orders.status,
+        originalFileName: prescriptions.originalFileName,
+        status: prescriptions.status,
+        submittedAt: prescriptions.submittedAt,
+      })
+      .from(prescriptions)
+      .innerJoin(orders, eq(prescriptions.orderId, orders.id))
+      .innerJoin(users, eq(prescriptions.customerUserId, users.id))
+      .orderBy(orderBy)
+      .limit(filters.limit)
+      .offset(offset)
+      .$dynamic();
+    if (whereClause) listQuery = listQuery.where(whereClause);
+    const rows = await listQuery;
+
+    return {
+      data: rows.map((row) => ({
+        createdAt: row.createdAt,
+        customer: {
+          email: row.customerEmail ?? null,
+          id: row.customerId,
+          name: row.customerName ?? null,
+        },
+        id: row.id,
+        order: {
+          id: row.orderId,
+          orderNumber: row.orderNumber,
+          status: row.orderStatus,
+        },
+        originalFileName: row.originalFileName,
+        status: row.status,
+        submittedAt: row.submittedAt,
+      })),
+      pagination: buildPagination(total, filters.page, filters.limit),
+    };
+  }
+
+  async reviewPrescription(input: ReviewPrescriptionServiceInput) {
+    const now = new Date();
+    const finalStatuses = new Set<PrescriptionStatus>([
+      "APPROVED",
+      "REJECTED",
+      "NEEDS_REVISION",
+    ]);
+    const notes =
+      input.input.notes.trim() ||
+      (input.input.decision === "APPROVED"
+        ? "Resep disetujui oleh apoteker."
+        : "Keputusan resep dicatat oleh apoteker.");
+
+    return db.transaction(async (tx) => {
+      const [prescription] = await tx
+        .select({
+          customerUserId: prescriptions.customerUserId,
+          id: prescriptions.id,
+          orderId: prescriptions.orderId,
+          status: prescriptions.status,
+        })
+        .from(prescriptions)
+        .where(eq(prescriptions.id, input.prescriptionId))
+        .limit(1);
+
+      if (!prescription) {
+        throw new NotFoundAppError("Resep tidak ditemukan.");
+      }
+
+      if (finalStatuses.has(prescription.status)) {
+        throw new ValidationAppError("Keputusan resep sudah final.");
+      }
+
+      const [order] = await tx
+        .select({
+          channel: orders.channel,
+          id: orders.id,
+          orderNumber: orders.orderNumber,
+          status: orders.status,
+        })
+        .from(orders)
+        .where(eq(orders.id, prescription.orderId))
+        .limit(1);
+
+      if (!order) {
+        throw new NotFoundAppError("Pesanan resep tidak ditemukan.");
+      }
+
+      await tx.insert(prescriptionReviews).values({
+        approvedItems: input.input.approvedItems,
+        decision: input.input.decision,
+        notes,
+        pharmacistUserId: input.actorUserId,
+        prescriptionId: prescription.id,
+      });
+
+      const [updatedPrescription] = await tx
+        .update(prescriptions)
+        .set({
+          status: input.input.decision,
+          updatedAt: now,
+        })
+        .where(eq(prescriptions.id, prescription.id))
+        .returning();
+
+      const nextOrderStatus =
+        input.input.decision === "APPROVED"
+          ? "AWAITING_PAYMENT"
+          : input.input.decision === "REJECTED"
+            ? "PRESCRIPTION_REJECTED"
+            : null;
+
+      if (nextOrderStatus && !canTransitionOrder(order.status, nextOrderStatus)) {
+        throw new ValidationAppError(
+          "Status pesanan tidak sesuai untuk keputusan resep ini.",
+        );
+      }
+
+      if (nextOrderStatus) {
+        await tx
+          .update(orders)
+          .set({
+            status: nextOrderStatus,
+            updatedAt: now,
+          })
+          .where(eq(orders.id, order.id));
+
+        await tx.insert(orderStatusHistory).values({
+          actorUserId: input.actorUserId,
+          fromStatus: order.status,
+          metadata: {
+            prescriptionDecision: input.input.decision,
+          },
+          note: notes,
+          orderId: order.id,
+          toStatus: nextOrderStatus,
+        });
+      }
+
+      const notificationType =
+        input.input.decision === "APPROVED"
+          ? "PRESCRIPTION_APPROVED"
+          : "PRESCRIPTION_REJECTED";
+      const notificationTitle =
+        input.input.decision === "APPROVED"
+          ? "Resep Disetujui"
+          : input.input.decision === "REJECTED"
+            ? "Resep Ditolak"
+            : "Resep Perlu Perbaikan";
+
+      await tx.insert(notifications).values({
+        actionHref: `/orders/${order.id}`,
+        dedupeKey: `prescription:${prescription.id}:decision:${input.input.decision}`,
+        message: `Hasil verifikasi resep untuk pesanan ${order.orderNumber} sudah tersedia.`,
+        severity: input.input.decision === "APPROVED" ? "success" : "warning",
+        title: notificationTitle,
+        type: notificationType,
+        userId: prescription.customerUserId,
+      });
+
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.PRESCRIPTION_REVIEWED,
+        actorRole: input.actorRole,
+        actorUserId: input.actorUserId,
+        correlationId: input.requestContext.correlationId,
+        description: "Resep diverifikasi dan keputusan dicatat terpisah dari file asli.",
+        ipAddress: input.requestContext.ipAddress,
+        metadata: {
+          approvedItemCount: input.input.approvedItems.length,
+          decision: input.input.decision,
+          orderNumber: order.orderNumber,
+        },
+        result: "SUCCESS",
+        targetId: prescription.id,
+        targetType: "prescription",
+        userAgent: input.requestContext.userAgent,
+      });
+
+      return updatedPrescription;
+    });
+  }
+
+  async transitionOrder(input: TransitionOrderInput) {
+    const now = new Date();
+
+    return db.transaction(async (tx) => {
+      const [currentOrder] = await tx
+        .select()
+        .from(orders)
+        .where(eq(orders.id, input.orderId))
+        .limit(1);
+
+      if (!currentOrder) {
+        throw new NotFoundAppError("Pesanan tidak ditemukan.");
+      }
+
+      assertOrderTransition(currentOrder.status, input.nextStatus);
+
+      const [updatedOrder] = await tx
+        .update(orders)
+        .set({
+          status: input.nextStatus,
+          updatedAt: now,
+        })
+        .where(eq(orders.id, currentOrder.id))
+        .returning();
+
+      await tx.insert(orderStatusHistory).values({
+        actorUserId: input.actorUserId,
+        fromStatus: currentOrder.status,
+        metadata: {
+          channel: currentOrder.channel,
+        },
+        note: input.note ?? null,
+        orderId: currentOrder.id,
+        toStatus: input.nextStatus,
+      });
+
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.ORDER_STATUS_CHANGED,
+        actorRole: input.actorRole,
+        actorUserId: input.actorUserId,
+        correlationId: input.requestContext.correlationId,
+        description: "Status pesanan diubah melalui workflow server-side.",
+        ipAddress: input.requestContext.ipAddress,
+        metadata: {
+          fromStatus: currentOrder.status,
+          note: input.note ?? null,
+          orderNumber: currentOrder.orderNumber,
+          toStatus: input.nextStatus,
+        },
+        result: "SUCCESS",
+        targetId: currentOrder.id,
+        targetType: "order",
+        userAgent: input.requestContext.userAgent,
+      });
+
+      if (currentOrder.customerUserId) {
+        await tx.insert(notifications).values({
+          actionHref: `/orders/${currentOrder.id}`,
+          dedupeKey: `order:${currentOrder.id}:status:${input.nextStatus}`,
+          message: `Status pesanan ${currentOrder.orderNumber} diperbarui.`,
+          severity: "info",
+          title: "Status Pesanan Diperbarui",
+          type: "ORDER_PROCESSING",
+          userId: currentOrder.customerUserId,
+        });
+      }
+
+      return updatedOrder;
+    });
+  }
+
+  async getOrderItemCount(orderId: string) {
+    const [row] = await readDb
+      .select({ total: countSql() })
+      .from(orderItems)
+      .where(eq(orderItems.orderId, orderId));
+
+    return Number(row?.total ?? 0);
+  }
+}
