@@ -1,7 +1,8 @@
 "use client";
 
 import { useForm } from "@tanstack/react-form";
-import { EyeOff, ShieldCheck } from "lucide-react";
+import { LogIn, MailCheck } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { Helmet } from "react-helmet-async";
@@ -16,15 +17,15 @@ import {
   PasswordInput,
   TextInput,
 } from "@/components/ui";
-import { APP_META_DESCRIPTION } from "@/constants/app";
+import { toast } from "@/components/ui/toast";
+import { APP_META_DESCRIPTION, APP_NAME } from "@/constants/app";
 import { ROUTES } from "@/constants/routes";
-import { eden } from "@/lib/eden";
+import { useLoginMutation } from "@/hooks/useAuth";
 import { getFieldError } from "@/utils/formErrors";
 import { getErrorMessage } from "@/utils/getErrorMessage";
-import { toast } from "@/components/ui/toast";
 
 /**
- * Login page for SmartStock Pro.
+ * Login page for Makmur Farma.
  */
 export default function LoginPage() {
   return (
@@ -39,21 +40,50 @@ function LoginLoading() {
     <main className="grid min-h-screen place-items-center bg-page-background p-6">
       <section className="grid gap-4 text-center">
         <BrandLogo className="mx-auto" />
-        <p className="ts-sm text-text-muted">Memuat halaman login...</p>
+        <p className="ts-sm text-text-muted">Memuat halaman masuk...</p>
       </section>
     </main>
   );
 }
 
+function getReasonMessage(reason: string | null) {
+  if (reason === "session-expired") {
+    return "Sesi Anda telah berakhir. Silakan masuk kembali.";
+  }
+
+  if (reason === "logout") {
+    return "Anda telah keluar dari Makmur Farma.";
+  }
+
+  return null;
+}
+
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") return null;
+
+  for (const value of Object.values(error as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const nested = value as Record<string, unknown>;
+    const responseValue = nested.value;
+
+    if (responseValue && typeof responseValue === "object") {
+      const payload = responseValue as Record<string, unknown>;
+      if (typeof payload.code === "string") return payload.code;
+    }
+  }
+
+  return null;
+}
+
 function LoginPageContent() {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitErrorCode, setSubmitErrorCode] = useState<string | null>(null);
+  const [lastEmail, setLastEmail] = useState("");
+  const login = useLoginMutation();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const reason = searchParams.get("reason");
-  const sessionExpiredMessage =
-    reason === "session-expired"
-      ? "Session Anda telah berakhir. Silakan masuk kembali."
-      : null;
+  const reasonMessage = getReasonMessage(searchParams.get("reason"));
+  const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const form = useForm({
     defaultValues: {
       email: "",
@@ -61,174 +91,147 @@ function LoginPageContent() {
     },
     onSubmit: async ({ value }) => {
       setSubmitError(null);
+      setSubmitErrorCode(null);
+      setLastEmail(value.email);
 
-      const response = await eden.api.v1.auth.login.post(value);
+      try {
+        const result = await login.mutateAsync({
+          ...value,
+          redirectTo,
+        });
 
-      if (response.error) {
+        toast.success("Berhasil masuk ke Makmur Farma.");
+        router.replace(result.redirectTo);
+      } catch (error) {
         const message = getErrorMessage(
-          response.error,
-          "Email atau password salah."
+          error,
+          "Email atau password tidak sesuai.",
         );
 
         toast.error(message);
         setSubmitError(message);
-
-        return;
+        setSubmitErrorCode(getErrorCode(error));
       }
-
-      router.replace(ROUTES.DASHBOARD);
     },
   });
-
-  let errorNode = null;
-
-  const displayErrorMessage = submitError ?? sessionExpiredMessage;
-
-  if (displayErrorMessage) {
-    errorNode = (
-      <section className="rounded-lg border border-danger-border bg-danger-bg px-4 py-3 text-danger">
-        <p className="ts-sm font-medium">{displayErrorMessage}</p>
-      </section>
-    );
-  }
+  const displayErrorMessage = submitError ?? reasonMessage;
+  const isEmailNotVerified =
+    submitError && submitErrorCode === "EMAIL_NOT_VERIFIED";
 
   return (
-    <main className="grid min-h-screen bg-page-background lg:grid-cols-[minmax(0,1fr)_520px]">
+    <main className="grid min-h-screen place-items-center bg-page-background px-4 py-8">
       <Helmet>
-        <title>Masuk ke SmartStock Pro | SmartStock Pro</title>
+        <title>Masuk | {APP_NAME}</title>
         <meta content={APP_META_DESCRIPTION} name="description" />
       </Helmet>
-      <section className="hidden bg-primary-navy px-12 py-10 text-text-inverse lg:grid">
-        <section className="flex h-full flex-col justify-between">
-          <BrandLogo className="brightness-0 invert" />
-          <section className="grid max-w-xl gap-6">
-            <BadgePanel />
-            <section className="grid gap-3">
-              <h1 className="ts-3xl text-text-inverse">
-                Kontrol akses untuk operasional gudang.
-              </h1>
-              <p className="ts-base max-w-lg text-sidebar-text">
-                Session aman, validasi permission, dan audit log aktif untuk
-                setiap aksi penting.
+
+      <Card className="w-full max-w-[460px]">
+        <CardHeader>
+          <section className="grid gap-4">
+            <BrandLogo />
+            <section className="grid gap-1">
+              <CardTitle>Selamat Datang</CardTitle>
+              <p className="ts-sm text-text-muted">
+                Masuk ke Makmur Farma untuk melanjutkan.
               </p>
             </section>
           </section>
-          <p className="ts-xs text-sidebar-muted">
-            PT Maju Bersama Digital
-          </p>
-        </section>
-      </section>
-      <section className="grid place-items-center px-4 py-8">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <section className="grid gap-3">
-              <BrandLogo />
-              <section className="grid gap-1">
-                <CardTitle>Masuk ke SmartStock Pro</CardTitle>
-                <p className="ts-sm text-text-muted">
-                  Gunakan email dan password yang diberikan admin.
-                </p>
-              </section>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {displayErrorMessage ? (
+            <section className="rounded-lg border border-danger-border bg-danger-bg px-4 py-3 text-danger">
+              <p className="ts-sm font-medium">{displayErrorMessage}</p>
             </section>
-          </CardHeader>
-          <CardContent>
-            {errorNode}
-            <form
-              className="grid gap-4"
-              onSubmit={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                form.handleSubmit();
+          ) : null}
+
+          {isEmailNotVerified ? (
+            <Link
+              className="ts-sm inline-flex items-center gap-2 rounded-lg border border-info-border bg-info-bg px-4 py-3 text-info"
+              href={`${ROUTES.CHECK_EMAIL}?email=${encodeURIComponent(lastEmail)}`}
+            >
+              <MailCheck aria-hidden="true" className="size-4" />
+              Kirim ulang email verifikasi
+            </Link>
+          ) : null}
+
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              form.handleSubmit();
+            }}
+          >
+            <form.Field
+              name="email"
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value) return "Email wajib diisi.";
+                  if (!value.includes("@")) return "Email tidak valid.";
+
+                  return undefined;
+                },
               }}
             >
-              <form.Field
-                name="email"
-                validators={{
-                  onChange: ({ value }) => {
-                    if (!value) {
-                      return "Email wajib diisi.";
-                    }
+              {(field) => (
+                <TextInput
+                  autoComplete="email"
+                  errorMessage={getFieldError(field.state.meta.errors)}
+                  id={field.name}
+                  label="Email"
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  placeholder="nama@email.com"
+                  required
+                  type="email"
+                  value={field.state.value}
+                />
+              )}
+            </form.Field>
+            <form.Field
+              name="password"
+              validators={{
+                onChange: ({ value }) =>
+                  value ? undefined : "Password wajib diisi.",
+              }}
+            >
+              {(field) => (
+                <PasswordInput
+                  autoComplete="current-password"
+                  errorMessage={getFieldError(field.state.meta.errors)}
+                  id={field.name}
+                  label="Password"
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  placeholder="Masukkan password"
+                  required
+                  value={field.state.value}
+                />
+              )}
+            </form.Field>
+            <form.Subscribe
+              selector={(state) => [state.canSubmit, state.isSubmitting]}
+            >
+              {([canSubmit, isSubmitting]) => (
+                <Button
+                  disabled={!canSubmit || isSubmitting || login.isPending}
+                  leftIcon={<LogIn />}
+                  type="submit"
+                >
+                  {isSubmitting || login.isPending ? "Memproses..." : "Masuk"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </form>
 
-                    if (!value.includes("@")) {
-                      return "Email tidak valid.";
-                    }
-
-                    return undefined;
-                  },
-                }}
-              >
-                {(field) => (
-                  <TextInput
-                    autoComplete="email"
-                    errorMessage={getFieldError(field.state.meta.errors)}
-                    id={field.name}
-                    label="Email"
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    placeholder="admin@smartstock.test"
-                    required
-                    type="email"
-                    value={field.state.value}
-                  />
-                )}
-              </form.Field>
-              <form.Field
-                name="password"
-                validators={{
-                  onChange: ({ value }) => {
-                    if (!value) {
-                      return "Password wajib diisi.";
-                    }
-
-                    return undefined;
-                  },
-                }}
-              >
-                {(field) => (
-                  <PasswordInput
-                    autoComplete="current-password"
-                    errorMessage={getFieldError(field.state.meta.errors)}
-                    id={field.name}
-                    label="Password"
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    placeholder="Masukkan password"
-                    required
-                    value={field.state.value}
-                  />
-                )}
-              </form.Field>
-              <form.Subscribe
-                selector={(state) => [state.canSubmit, state.isSubmitting]}
-              >
-                {([canSubmit, isSubmitting]) => (
-                  <Button
-                    disabled={!canSubmit || isSubmitting}
-                    leftIcon={<ShieldCheck />}
-                    type="submit"
-                  >
-                    {isSubmitting ? "Memproses..." : "Masuk"}
-                  </Button>
-                )}
-              </form.Subscribe>
-            </form>
-            <section className="rounded-lg border border-border-default bg-muted-surface px-4 py-3">
-              <p className="ts-sm text-text-muted">
-                Lupa password? Minta admin untuk reset password akun.
-              </p>
-            </section>
-          </CardContent>
-        </Card>
-      </section>
+          <p className="ts-sm text-center text-text-muted">
+            Belum memiliki akun?{" "}
+            <Link className="font-medium text-primary-blue" href={ROUTES.REGISTER}>
+              Daftar sebagai pelanggan
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
     </main>
-  );
-}
-
-function BadgePanel() {
-  return (
-    <section className="inline-flex w-fit items-center gap-2 rounded-full border border-sidebar-border bg-sidebar-hover px-3 py-2">
-      <EyeOff aria-hidden="true" className="size-4 text-operational-cyan" />
-      <span className="ts-sm text-sidebar-text">Session cookie httpOnly</span>
-    </section>
   );
 }

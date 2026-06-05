@@ -29,3 +29,23 @@ export function verifyPassword(
 ): Promise<boolean> {
   return verify(passwordHash, password, PASSWORD_HASH_OPTIONS);
 }
+
+/**
+ * Checks whether an existing Argon2 hash should be regenerated with current
+ * policy parameters after a successful login.
+ */
+export function needsPasswordRehash(passwordHash: string): boolean {
+  if (!passwordHash.startsWith("$argon2id$")) {
+    return true;
+  }
+
+  const expectedParameters = [
+    `m=${PASSWORD_HASH_OPTIONS.memoryCost}`,
+    `t=${PASSWORD_HASH_OPTIONS.timeCost}`,
+    `p=${PASSWORD_HASH_OPTIONS.parallelism}`,
+  ];
+
+  return expectedParameters.some(
+    (parameter) => !passwordHash.includes(parameter),
+  );
+}

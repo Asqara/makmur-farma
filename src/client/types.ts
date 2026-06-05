@@ -1,6 +1,7 @@
-import type { Permission, UserRole } from "@/constants/auth";
+import type { Permission, UserRole, UserStatus } from "@/constants/auth";
 import type { UserRow } from "@/drizzle-schema";
 import type { RequestContext } from "@/lib/request";
+import { getPermissionsForRole } from "@/utils/permissions";
 
 /**
  * Safe user shape returned to frontend and API clients.
@@ -8,12 +9,16 @@ import type { RequestContext } from "@/lib/request";
 export type PublicUser = {
   createdAt: Date;
   email: string;
+  emailVerifiedAt: Date | null;
+  fullName: string;
   id: string;
   isActive: boolean;
   lastLoginAt: Date | null;
   name: string;
+  phone: string | null;
   permissions: Permission[];
   role: UserRole;
+  status: UserStatus;
   updatedAt: Date;
 };
 
@@ -21,10 +26,11 @@ export type PublicUser = {
  * Authenticated request session data.
  */
 export type AuthSession = {
+  absoluteExpiresAt: Date;
   csrfTokenHash: string;
-  expiresAt: Date;
   id: string;
   idleExpiresAt: Date;
+  lastActivityAt: Date;
   permissions: Permission[];
   user: PublicUser;
   userId: string;
@@ -41,15 +47,21 @@ export type AuditContext = RequestContext & {
  * Converts a database user row to public API shape.
  */
 export function toPublicUser(user: UserRow): PublicUser {
+  const permissions = getPermissionsForRole(user.role);
+
   return {
     createdAt: user.createdAt,
     email: user.email,
+    emailVerifiedAt: user.emailVerifiedAt,
+    fullName: user.fullName,
     id: user.id,
-    isActive: user.isActive,
+    isActive: user.status === "ACTIVE" && user.isActive,
     lastLoginAt: user.lastLoginAt,
-    name: user.name,
-    permissions: [],
+    name: user.fullName,
+    permissions,
+    phone: user.phone,
     role: user.role,
+    status: user.status,
     updatedAt: user.updatedAt,
   };
 }

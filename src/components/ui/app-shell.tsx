@@ -1,6 +1,4 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
-import Link from "next/link";
 
 import { NAVIGATION_COPY } from "@/constants/design";
 import { mc } from "@/utils/mc";
@@ -28,7 +26,7 @@ export type AppShellNavGroup = {
 };
 
 /**
- * Props for the SmartStock Pro dashboard shell.
+ * Props for the Makmur Farma dashboard shell.
  */
 export type AppShellProps = ComponentPropsWithoutRef<"section"> & {
   collapsed?: boolean;
@@ -52,6 +50,69 @@ type SidebarContentProps = {
   userMenu?: ReactNode;
 };
 
+function NavItem({
+  collapsed,
+  item,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  item: AppShellNavItem;
+  onNavigate?: () => void;
+}) {
+  const baseClass = mc(
+    "ts-sm flex min-w-0 items-center gap-2.5 rounded-lg px-3 font-medium transition-colors",
+    "text-sidebar-text hover:bg-sidebar-hover hover:text-text-strong",
+    item.active && "bg-sidebar-active-bg text-sidebar-active-text font-semibold",
+    collapsed ? "min-h-10 justify-center px-0" : "min-h-10",
+  );
+
+  let iconNode: ReactNode = null;
+
+  if (item.icon) {
+    iconNode = (
+      <span
+        aria-hidden="true"
+        className="inline-flex shrink-0 [&>svg]:size-[18px] [&>svg]:stroke-[1.75]"
+      >
+        {item.icon}
+      </span>
+    );
+  }
+
+  let badgeNode: ReactNode = null;
+
+  if (!collapsed && item.badge) {
+    badgeNode = (
+      <span className="ml-auto shrink-0">{item.badge}</span>
+    );
+  }
+
+  const inner = collapsed ? (
+    <>
+      {iconNode}
+      <span className="sr-only">{item.label}</span>
+    </>
+  ) : (
+    <>
+      {iconNode}
+      <span className="truncate">{item.label}</span>
+      {badgeNode}
+    </>
+  );
+
+  return (
+    <a
+      aria-current={item.active ? "page" : undefined}
+      className={baseClass}
+      href={item.href}
+      onClick={onNavigate}
+      title={collapsed ? item.label : undefined}
+    >
+      {inner}
+    </a>
+  );
+}
+
 function SidebarContent({
   collapsed = false,
   navGroups,
@@ -60,226 +121,100 @@ function SidebarContent({
   topItems,
   userMenu,
 }: SidebarContentProps) {
-  let sidebarActionsNode: ReactNode = null;
-
-  if (sidebarActions) {
-    sidebarActionsNode = (
-      <section className="flex items-center gap-2">
-        {sidebarActions}
-      </section>
-    );
-  }
-
   let footerNode: ReactNode = null;
 
-if (userMenu) {
-  footerNode = (
-    <footer
-      className={mc(
-        "mt-auto border-t border-sidebar-border px-3 py-4",
-        collapsed && "px-2"
-      )}
-    >
-      <section className="flex items-center">
-        {userMenu}
-      </section>
-    </footer>
-  );
-}
-
-  let navContent: ReactNode = null;
-
-  if (collapsed) {
-    const collapsedItems = [
-      ...(topItems ?? []).map((item) => ({
-        icon: item.icon,
-        item,
-      })),
-      ...navGroups.flatMap((group) =>
-        group.items.map((item) => ({
-          icon: item.icon ?? group.icon,
-          item,
-        })),
-      ),
-    ].filter((entry) => entry.icon);
-
-    navContent = (
-      <ul className="grid gap-3">
-        {collapsedItems.map(({ icon, item }) => {
-            const iconNode = (
-              <span
-                aria-hidden="true"
-                className="inline-flex shrink-0 [&>svg]:size-[18px]"
-              >
-                {icon}
-              </span>
-            );
-
-            return (
-              <li key={item.href}>
-                <Link
-                  aria-current={item.active ? "page" : undefined}
-                  className={mc(
-                    "ts-sm flex min-h-10 min-w-0 items-center justify-center rounded-md px-0 font-medium text-sidebar-text transition-colors hover:bg-sidebar-hover hover:text-text-inverse",
-                    item.active &&
-                      "bg-sidebar-hover text-text-inverse ring-1 ring-sidebar-border",
-                  )}
-                  href={item.href}
-                  onClick={onNavigate}
-                  title={item.label}
-                >
-                  {iconNode}
-                </Link>
-              </li>
-            );
-          })}
-      </ul>
-    );
-  } else {
-    const topItemsNode = (topItems ?? []).length ? (
-      <ul className="grid gap-1">
-        {(topItems ?? []).map((item) => {
-          let iconNode: ReactNode = null;
-
-          if (item.icon) {
-            iconNode = (
-              <span
-                aria-hidden="true"
-                className="inline-flex shrink-0 [&>svg]:size-[18px]"
-              >
-                {item.icon}
-              </span>
-            );
-          }
-
-          let badgeNode: ReactNode = null;
-
-          // if (item.badge) {
-          //   badgeNode = (
-          //     <span className="ml-auto shrink-0">{item.badge}</span>
-          //   );
-          // }
-
-          return (
-            <li key={item.href}>
-              <Link
-                aria-current={item.active ? "page" : undefined}
-                className={mc(
-                  "ts-sm flex min-h-11 min-w-0 items-center gap-3 rounded-md px-3 font-medium text-sidebar-text transition-colors hover:bg-sidebar-hover hover:text-text-inverse",
-                  item.active &&
-                    "bg-sidebar-hover text-text-inverse ring-1 ring-sidebar-border",
-                )}
-                href={item.href}
-                onClick={onNavigate}
-              >
-                {iconNode}
-                <span className="truncate">{item.label}</span>
-                {badgeNode}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    ) : null;
-
-    const groupNodes = navGroups.map((group) => (
-      <details
-        className="group grid gap-2 my-3"
-        key={group.label}
-        open={group.items.some((item) => item.active)}
-      >
-        <summary className="ts-xs flex items-center gap-3 px-3 font-semibold uppercase text-sidebar-muted transition-colors hover:text-text-inverse [&::-webkit-details-marker]:hidden">
-          {group.icon ? (
-            <span
-              aria-hidden="true"
-              className="inline-flex shrink-0 [&>svg]:size-[18px]"
-            >
-              {group.icon}
-            </span>
-          ) : null}
-          <span className="truncate">{group.label}</span>
-          <ChevronDown
-            aria-hidden="true"
-            className="ml-auto size-4 transition-transform group-open:rotate-180"
-          />
-        </summary>
-        <ul className="grid gap-1 mt-3">
-          {group.items.map((item) => {
-            let badgeNode: ReactNode = null;
-
-            if (item.badge) {
-              badgeNode = (
-                <span className="ml-auto shrink-0">{item.badge}</span>
-              );
-            }
-
-            return (
-              <li key={item.href}>
-                <Link
-                  aria-current={item.active ? "page" : undefined}
-                  className={mc(
-                    "ts-sm flex min-h-8 min-w-0 items-center gap-3 rounded-md px-3 font-medium text-sidebar-text transition-colors hover:bg-sidebar-hover hover:text-text-inverse",
-                    item.active &&
-                      "bg-sidebar-hover text-text-inverse ring-1 ring-sidebar-border",
-                  )}
-                  href={item.href}
-                  onClick={onNavigate}
-                >
-                  <span className="truncate">{item.label}</span>
-                  {badgeNode}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </details>
-    ));
-
-    navContent = (
-      <>
-        {topItemsNode}
-        {groupNodes}
-      </>
-    );
-  }
-
-  return (
-    <section className="flex h-full flex-col">
-      <header
+  if (userMenu) {
+    footerNode = (
+      <footer
         className={mc(
-          "flex h-16 items-center border-b border-sidebar-border px-4",
-          collapsed && "justify-center px-2",
-        )}
-      >
-        <section
-          className={mc(
-            "flex w-full items-center",
-            collapsed ? "justify-center" : "justify-between",
-          )}
-        >
-          <section className="flex min-w-0 items-center gap-3">
-            <BrandLogo className={collapsed ? "hidden" : "block"} />
-            
-          </section>
-          {sidebarActionsNode}
-        </section>
-      </header>
-      <nav
-        aria-label={NAVIGATION_COPY.main}
-        className={mc(
-          "grid flex-1 content-start items-start gap-2 px-3 py-3",
+          "mt-auto border-t border-sidebar-border px-3 py-4",
           collapsed && "px-2",
         )}
       >
-        {navContent}
+        {userMenu}
+      </footer>
+    );
+  }
+
+  const topItemsNode = (topItems ?? []).length ? (
+    <ul className="grid gap-0.5 px-1">
+      {(topItems ?? []).map((item) => (
+        <li key={item.href}>
+          <NavItem collapsed={collapsed} item={item} onNavigate={onNavigate} />
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
+  const groupNodes = navGroups.map((group) => (
+    <section className="grid gap-0.5" key={group.label}>
+      {!collapsed && (
+        <p
+          className={mc(
+            "ts-xs mb-1 px-3 font-semibold uppercase tracking-widest",
+            "text-sidebar-group-label",
+          )}
+        >
+          {group.label}
+        </p>
+      )}
+      <ul className="grid gap-0.5 px-1">
+        {group.items.map((item) => (
+          <li key={item.href}>
+            <NavItem
+              collapsed={collapsed}
+              item={item}
+              onNavigate={onNavigate}
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
+  ));
+
+  return (
+    <section className="flex h-full flex-col">
+      {/* Brand area */}
+      <header
+        className={mc(
+          "flex shrink-0 items-center border-b border-sidebar-border px-4",
+          collapsed ? "h-[68px] justify-center px-2" : "h-[68px] justify-between",
+        )}
+      >
+        <BrandLogo
+          className={mc(collapsed ? "hidden" : "block")}
+          variant="horizontal"
+        />
+        {collapsed && (
+          <BrandLogo variant="compact" />
+        )}
+        {!collapsed && sidebarActions && (
+          <section className="flex items-center gap-1">
+            {sidebarActions}
+          </section>
+        )}
+      </header>
+
+      {/* Navigation */}
+      <nav
+        aria-label={NAVIGATION_COPY.main}
+        className={mc(
+          "flex flex-1 flex-col gap-4 overflow-y-auto px-1 py-4",
+          collapsed && "items-center px-0",
+        )}
+      >
+        {topItemsNode}
+        {groupNodes}
       </nav>
+
       {footerNode}
     </section>
   );
 }
 
 /**
- * Dashboard shell with sidebar, topbar, and responsive main content area.
+ * Dashboard shell with white sidebar, topbar, and responsive main content.
+ * On mobile the sidebar collapses into a left drawer.
  */
 export function AppShell({
   children,
@@ -305,9 +240,7 @@ export function AppShell({
 
   if (warehouseContext) {
     warehouseNode = (
-      <section className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border-default bg-muted-surface px-3 py-2">
-        {warehouseContext}
-      </section>
+      <section className="flex items-center gap-2">{warehouseContext}</section>
     );
   }
 
@@ -323,18 +256,23 @@ export function AppShell({
 
   if (mobileOpen) {
     mobileSidebarNode = (
-      <section className="fixed inset-0 z-50 lg:hidden" aria-label="Menu mobile">
+      <section
+        aria-label="Menu mobile"
+        className="fixed inset-0 z-50 lg:hidden"
+      >
+        {/* Overlay */}
         <button
           aria-label="Tutup menu"
-          className="absolute inset-0 bg-primary-navy/50"
+          className="absolute inset-0 bg-primary-navy/40"
           onClick={() => onMobileOpenChange?.(false)}
           type="button"
         />
-        <aside className="absolute inset-y-0 left-0 w-[min(19rem,calc(100vw-2rem))] overflow-y-auto bg-primary-navy text-text-inverse shadow-lg">
+        {/* Drawer */}
+        <aside className="absolute inset-y-0 left-0 w-[min(280px,calc(100vw-2rem))] overflow-y-auto border-r border-sidebar-border bg-sidebar-surface shadow-dialog">
           <SidebarContent
-            sidebarActions={sidebarActions}
             navGroups={navGroups}
             onNavigate={() => onMobileOpenChange?.(false)}
+            sidebarActions={sidebarActions}
             topItems={topItems}
             userMenu={userMenu}
           />

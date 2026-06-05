@@ -44,11 +44,30 @@ export class AuthenticationError extends AppError {
 }
 
 /**
+ * Error for accounts that still need email verification.
+ */
+export class EmailNotVerifiedError extends AppError {
+  constructor(publicMessage = "Email belum diverifikasi.") {
+    super(403, "EMAIL_NOT_VERIFIED", publicMessage);
+  }
+}
+
+/**
  * Error for missing or expired sessions.
  */
 export class UnauthorizedError extends AppError {
   constructor(publicMessage = "Session telah berakhir. Silakan login kembali.") {
     super(401, "UNAUTHORIZED", publicMessage);
+  }
+}
+
+/**
+ * Error for expired session records.
+ */
+export class SessionExpiredError extends UnauthorizedError {
+  constructor(publicMessage = "Sesi Anda telah berakhir. Silakan masuk kembali.") {
+    super(publicMessage);
+    this.code = "SESSION_EXPIRED";
   }
 }
 
@@ -62,11 +81,47 @@ export class InactiveAccountError extends AppError {
 }
 
 /**
+ * Error for suspended or disabled user accounts.
+ */
+export class AccountDisabledError extends AppError {
+  constructor(publicMessage = "Akun tidak dapat digunakan saat ini.") {
+    super(403, "ACCOUNT_DISABLED", publicMessage);
+  }
+}
+
+/**
  * Error for insufficient permission.
  */
 export class ForbiddenError extends AppError {
   constructor(publicMessage = "Anda tidak memiliki akses untuk aksi ini.") {
     super(403, "FORBIDDEN", publicMessage);
+  }
+}
+
+/**
+ * Error for invalid or reused email verification tokens.
+ */
+export class InvalidVerificationTokenError extends AppError {
+  constructor(publicMessage = "Tautan verifikasi tidak valid.") {
+    super(400, "INVALID_VERIFICATION_TOKEN", publicMessage);
+  }
+}
+
+/**
+ * Error for expired email verification tokens.
+ */
+export class VerificationTokenExpiredError extends AppError {
+  constructor(publicMessage = "Tautan verifikasi sudah kedaluwarsa.") {
+    super(400, "VERIFICATION_TOKEN_EXPIRED", publicMessage);
+  }
+}
+
+/**
+ * Error for unsafe redirect targets.
+ */
+export class UnsafeRedirectError extends AppError {
+  constructor(publicMessage = "Tujuan redirect tidak valid.") {
+    super(400, "UNSAFE_REDIRECT", publicMessage);
   }
 }
 

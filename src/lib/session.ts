@@ -11,6 +11,7 @@ import {
   SESSION_ABSOLUTE_TIMEOUT_SECONDS,
   SESSION_IDLE_TIMEOUT_SECONDS,
 } from "@/constants/auth";
+import { ENV } from "@/constants/config";
 import { parseCookieHeader } from "@/utils/cookies";
 
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -104,20 +105,30 @@ export function getCsrfTokenFromRequest(request: Request): string | null {
 }
 
 /**
+ * Reads CSRF token only from the required mutation header.
+ */
+export function getCsrfHeaderFromRequest(request: Request): string | null {
+  return request.headers.get(CSRF_HEADER_NAME);
+}
+
+/**
  * Creates cookies for a new authenticated session.
  */
 export function createAuthCookies(sessionToken: string, csrfToken: string) {
   return [
     serializeCookie(SESSION_COOKIE_NAME, sessionToken, {
       httpOnly: true,
-      maxAge: SESSION_ABSOLUTE_TIMEOUT_SECONDS,
+      maxAge:
+        ENV.auth.sessionAbsoluteTimeoutSeconds ||
+        SESSION_ABSOLUTE_TIMEOUT_SECONDS,
       path: "/",
       sameSite: "lax",
       secure: IS_PRODUCTION,
     }),
     serializeCookie(CSRF_COOKIE_NAME, csrfToken, {
       httpOnly: false,
-      maxAge: SESSION_IDLE_TIMEOUT_SECONDS,
+      maxAge:
+        ENV.auth.sessionIdleTimeoutSeconds || SESSION_IDLE_TIMEOUT_SECONDS,
       path: "/",
       sameSite: "lax",
       secure: IS_PRODUCTION,

@@ -2,12 +2,14 @@ import {
   SESSION_ABSOLUTE_TIMEOUT_SECONDS,
   SESSION_IDLE_TIMEOUT_SECONDS,
 } from "@/constants/auth";
+import { ENV } from "@/constants/config";
 
 /**
  * Expiry fields required to evaluate session validity.
  */
 export type SessionExpiryInput = {
-  expiresAt: Date;
+  absoluteExpiresAt?: Date;
+  expiresAt?: Date;
   idleExpiresAt: Date;
   revokedAt: Date | null;
 };
@@ -16,12 +18,15 @@ export type SessionExpiryInput = {
  * Creates idle and absolute expiry dates from one timestamp.
  */
 export function createSessionExpiry(now = new Date()) {
+  const absoluteExpiresAt = new Date(
+    now.getTime() + ENV.auth.sessionAbsoluteTimeoutSeconds * 1_000,
+  );
+
   return {
-    expiresAt: new Date(
-      now.getTime() + SESSION_ABSOLUTE_TIMEOUT_SECONDS * 1_000,
-    ),
+    absoluteExpiresAt,
+    expiresAt: absoluteExpiresAt,
     idleExpiresAt: new Date(
-      now.getTime() + SESSION_IDLE_TIMEOUT_SECONDS * 1_000,
+      now.getTime() + ENV.auth.sessionIdleTimeoutSeconds * 1_000,
     ),
   };
 }
@@ -33,11 +38,13 @@ export function isSessionExpired(
   session: SessionExpiryInput,
   now = new Date(),
 ): boolean {
+  const absoluteExpiresAt = session.absoluteExpiresAt ?? session.expiresAt;
+
   if (session.revokedAt) {
     return true;
   }
 
-  if (session.expiresAt.getTime() <= now.getTime()) {
+  if (!absoluteExpiresAt || absoluteExpiresAt.getTime() <= now.getTime()) {
     return true;
   }
 
@@ -49,7 +56,9 @@ export function isSessionExpired(
  */
 export function renewIdleExpiry(expiresAt: Date, now = new Date()) {
   const nextIdleExpiry = new Date(
-    now.getTime() + SESSION_IDLE_TIMEOUT_SECONDS * 1_000,
+    now.getTime() +
+      (ENV.auth.sessionIdleTimeoutSeconds || SESSION_IDLE_TIMEOUT_SECONDS) *
+        1_000,
   );
 
   if (nextIdleExpiry.getTime() > expiresAt.getTime()) {

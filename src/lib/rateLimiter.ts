@@ -10,44 +10,71 @@ import {
 import {
   AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
   AUTH_LOGIN_RATE_LIMIT_KEY_PREFIX,
-  AUTH_LOGIN_RATE_LIMIT_UNKNOWN_IP,
   AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+  AUTH_RATE_LIMIT_UNKNOWN_IP,
+  AUTH_REGISTER_RATE_LIMIT_ATTEMPTS,
+  AUTH_REGISTER_RATE_LIMIT_KEY_PREFIX,
+  AUTH_REGISTER_RATE_LIMIT_WINDOW_SECONDS,
+  AUTH_RESEND_VERIFICATION_RATE_LIMIT_KEY_PREFIX,
+  AUTH_VERIFICATION_RATE_LIMIT_ATTEMPTS,
+  AUTH_VERIFICATION_RATE_LIMIT_KEY_PREFIX,
+  AUTH_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS,
 } from "@/constants/auth";
+import { ENV } from "@/constants/config";
 import { RateLimitError } from "@/lib/errors";
 
 type RateLimiterInstance = RateLimiterRedis | RateLimiterMemory;
+
+type RateLimiterConfig = {
+  duration: number;
+  keyPrefix: string;
+  points: number;
+};
 
 /**
  * Rate limiter helper for security-sensitive routes.
  */
 export class RateLimiter {
-  private static loginFallbackLimiter = new RateLimiterMemory({
-    points: AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
-    duration: AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-    keyPrefix: AUTH_LOGIN_RATE_LIMIT_KEY_PREFIX,
-  });
+  private static redis = ENV.redisUrl
+    ? new Redis(ENV.redisUrl, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+      })
+    : null;
 
-  private static loginLimiter = RateLimiter.createLoginLimiter();
+  private static limiters = new Map<string, RateLimiterInstance>();
 
-  private static createLoginLimiter(): RateLimiterInstance {
-    const redisUrl = process.env.REDIS_URL;
+  private static createLimiter(config: RateLimiterConfig): RateLimiterInstance {
+    const fallbackLimiter = new RateLimiterMemory({
+      duration: config.duration,
+      keyPrefix: config.keyPrefix,
+      points: config.points,
+    });
 
-    if (!redisUrl) {
-      return RateLimiter.loginFallbackLimiter;
+    if (!RateLimiter.redis) {
+      return fallbackLimiter;
     }
 
-    const redis = new Redis(redisUrl, {
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-    });
-
     return new RateLimiterRedis({
-      storeClient: redis,
-      points: AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
-      duration: AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-      keyPrefix: AUTH_LOGIN_RATE_LIMIT_KEY_PREFIX,
-      insuranceLimiter: RateLimiter.loginFallbackLimiter,
+      duration: config.duration,
+      insuranceLimiter: fallbackLimiter,
+      keyPrefix: config.keyPrefix,
+      points: config.points,
+      storeClient: RateLimiter.redis,
     });
+  }
+
+  private static getLimiter(config: RateLimiterConfig): RateLimiterInstance {
+    const existing = RateLimiter.limiters.get(config.keyPrefix);
+
+    if (existing) {
+      return existing;
+    }
+
+    const limiter = RateLimiter.createLimiter(config);
+    RateLimiter.limiters.set(config.keyPrefix, limiter);
+
+    return limiter;
   }
 
   private static isRateLimiterRes(value: unknown): value is RateLimiterRes {
@@ -64,18 +91,13 @@ export class RateLimiter {
     return typeof candidate.msBeforeNext === "number";
   }
 
-  private static getLoginKey(ipAddress: string | null, email: string) {
-    return `${ipAddress ?? AUTH_LOGIN_RATE_LIMIT_UNKNOWN_IP}:${email}`;
+  private static getKey(ipAddress: string | null, identifier: string) {
+    return `${ipAddress ?? AUTH_RATE_LIMIT_UNKNOWN_IP}:${identifier}`;
   }
 
-  /**
-   * Consume one login attempt or throw `RateLimitError`.
-   */
-  static async consumeAuthLogin(ipAddress: string | null, email: string) {
-    const key = RateLimiter.getLoginKey(ipAddress, email);
-
+  private static async consume(config: RateLimiterConfig, key: string) {
     try {
-      await RateLimiter.loginLimiter.consume(key, 1);
+      await RateLimiter.getLimiter(config).consume(key, 1);
     } catch (error) {
       if (RateLimiter.isRateLimiterRes(error)) {
         const retryAfterSeconds = Math.max(
@@ -88,5 +110,64 @@ export class RateLimiter {
 
       console.warn("Rate limit check gagal.", error);
     }
+  }
+
+  /**
+   * Consume one login attempt or throw `RateLimitError`.
+   */
+  static async consumeAuthLogin(ipAddress: string | null, email: string) {
+    await RateLimiter.consume(
+      {
+        duration: AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        keyPrefix: AUTH_LOGIN_RATE_LIMIT_KEY_PREFIX,
+        points: AUTH_LOGIN_RATE_LIMIT_ATTEMPTS,
+      },
+      RateLimiter.getKey(ipAddress, email),
+    );
+  }
+
+  /**
+   * Consume one public registration attempt.
+   */
+  static async consumeAuthRegistration(ipAddress: string | null, email: string) {
+    await RateLimiter.consume(
+      {
+        duration: AUTH_REGISTER_RATE_LIMIT_WINDOW_SECONDS,
+        keyPrefix: AUTH_REGISTER_RATE_LIMIT_KEY_PREFIX,
+        points: AUTH_REGISTER_RATE_LIMIT_ATTEMPTS,
+      },
+      RateLimiter.getKey(ipAddress, email),
+    );
+  }
+
+  /**
+   * Consume one email verification attempt.
+   */
+  static async consumeEmailVerification(ipAddress: string | null, token: string) {
+    await RateLimiter.consume(
+      {
+        duration: AUTH_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS,
+        keyPrefix: AUTH_VERIFICATION_RATE_LIMIT_KEY_PREFIX,
+        points: AUTH_VERIFICATION_RATE_LIMIT_ATTEMPTS,
+      },
+      RateLimiter.getKey(ipAddress, token.slice(0, 12)),
+    );
+  }
+
+  /**
+   * Consume one resend-verification attempt.
+   */
+  static async consumeResendVerification(
+    ipAddress: string | null,
+    email: string,
+  ) {
+    await RateLimiter.consume(
+      {
+        duration: AUTH_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS,
+        keyPrefix: AUTH_RESEND_VERIFICATION_RATE_LIMIT_KEY_PREFIX,
+        points: AUTH_VERIFICATION_RATE_LIMIT_ATTEMPTS,
+      },
+      RateLimiter.getKey(ipAddress, email),
+    );
   }
 }

@@ -4,7 +4,14 @@ import { NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/constants/cookies";
 import { ROUTES } from "@/constants/routes";
 
-const PUBLIC_PATHS = [ROUTES.LOGIN, ROUTES.LOGOUT];
+const PUBLIC_PATHS = [
+  ROUTES.ACCESS_DENIED,
+  ROUTES.CHECK_EMAIL,
+  ROUTES.LOGIN,
+  ROUTES.LOGOUT,
+  ROUTES.REGISTER,
+  ROUTES.VERIFY_EMAIL,
+];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path);
