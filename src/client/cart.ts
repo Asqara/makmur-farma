@@ -20,7 +20,10 @@ import {
 } from "@/lib/errors";
 import type { PaymentMethod } from "@/constants/domain";
 
+import { InventoryWorkflowClient } from "./inventory";
 import { calculateOrderTotals } from "./order-rules";
+
+const inventoryWorkflow = new InventoryWorkflowClient();
 
 export type CartItemDetail = {
   cartId: string;
@@ -441,6 +444,13 @@ export class CartClient {
         orderId: newOrder.id,
         toStatus: initialStatus,
       });
+
+      if (initialStatus === "AWAITING_PAYMENT") {
+        await inventoryWorkflow.reserveOrderStockTx(tx, newOrder.id, {
+          actorUserId: userId,
+          expiresAt,
+        });
+      }
 
       const [newPayment] = await tx
         .insert(payments)

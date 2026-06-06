@@ -12,11 +12,30 @@ import { HealthStatusBadge } from "./status-badge";
 export type MonitoringHealthCardProps = ComponentPropsWithoutRef<"article"> & {
   description?: string;
   icon?: ReactNode;
-  lastChecked: string;
+  lastChecked: Date | string;
   metric: string;
   serviceName: string;
   status: HealthStatus;
 };
+
+function formatLastChecked(value: Date | string) {
+  if (value instanceof Date) {
+    return new Intl.DateTimeFormat("id-ID", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(value);
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime()) && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    return new Intl.DateTimeFormat("id-ID", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(parsed);
+  }
+
+  return value;
+}
 
 /**
  * Compact system health card for API, database, Redis, and worker status.
@@ -31,6 +50,7 @@ export function MonitoringHealthCard({
   status,
   ...props
 }: MonitoringHealthCardProps) {
+  const lastCheckedLabel = formatLastChecked(lastChecked);
   let iconNode: ReactNode = null;
 
   if (icon) {
@@ -61,7 +81,7 @@ export function MonitoringHealthCard({
       </header>
       <section className="mt-4 grid gap-1">
         <strong className="ts-lg text-text-strong">{metric}</strong>
-        <p className="ts-xs text-text-muted">{lastChecked}</p>
+        <p className="ts-xs text-text-muted">{lastCheckedLabel}</p>
         {descriptionNode}
       </section>
     </Card>

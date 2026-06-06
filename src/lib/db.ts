@@ -25,3 +25,4 @@ export const db = drizzle(writeClient, { schema });
 export const readDb = drizzle(readClient, { schema });
 
 export type DatabaseClient = typeof db;
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];

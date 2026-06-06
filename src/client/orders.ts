@@ -37,7 +37,10 @@ import {
   toString,
   type ListResponse,
 } from "./list-utils";
+import { InventoryWorkflowClient } from "./inventory";
 import { assertOrderTransition, calculateOrderTotals } from "./order-rules";
+
+const inventoryWorkflow = new InventoryWorkflowClient();
 
 const ORDER_SORT_FIELDS = {
   createdAt: orders.createdAt,
@@ -101,6 +104,7 @@ export type PrescriptionListItem = {
     orderNumber: string;
     status: OrderStatus;
   };
+  latestNote: string | null;
   originalFileName: string;
   status: PrescriptionStatus;
   submittedAt: Date;
@@ -160,6 +164,7 @@ export class OrdersClient {
     const id = toString(filters.where.id);
     const status = toString(filters.where.status) as OrderStatus | undefined;
     const channel = toString(filters.where.channel) as OrderChannel | undefined;
+    const customerUserId = toString(filters.where.customerUserId);
     const dateFrom = toString(filters.where.dateFrom);
     const dateTo = toString(filters.where.dateTo);
     const searchCondition = buildTextSearch(filters.search, [
@@ -171,6 +176,7 @@ export class OrdersClient {
     if (id) conditions.push(eq(orders.id, id));
     if (status) conditions.push(eq(orders.status, status));
     if (channel) conditions.push(eq(orders.channel, channel));
+    if (customerUserId) conditions.push(eq(orders.customerUserId, customerUserId));
     if (dateFrom) conditions.push(gte(orders.createdAt, new Date(dateFrom)));
     if (dateTo) conditions.push(lte(orders.createdAt, new Date(dateTo)));
     if (searchCondition) conditions.push(searchCondition);
@@ -314,6 +320,7 @@ export class OrdersClient {
     const filters = getListFilters(searchParams);
     const conditions = [];
     const orderId = toString(filters.where.orderId);
+    const customerUserId = toString(filters.where.customerUserId);
     const status = toString(filters.where.status) as PaymentStatus | undefined;
     const searchCondition = buildTextSearch(filters.search, [
       orders.orderNumber,
@@ -322,6 +329,7 @@ export class OrdersClient {
     ]);
 
     if (orderId) conditions.push(eq(payments.orderId, orderId));
+    if (customerUserId) conditions.push(eq(orders.customerUserId, customerUserId));
     if (status) conditions.push(eq(payments.status, status));
     if (searchCondition) conditions.push(searchCondition);
 
@@ -389,6 +397,7 @@ export class OrdersClient {
     const filters = getListFilters(searchParams);
     const conditions = [];
     const orderId = toString(filters.where.orderId);
+    const customerUserId = toString(filters.where.customerUserId);
     const id = toString(filters.where.id);
     const status = toString(filters.where.status) as
       | PrescriptionStatus
@@ -402,6 +411,9 @@ export class OrdersClient {
 
     if (id) conditions.push(eq(prescriptions.id, id));
     if (orderId) conditions.push(eq(prescriptions.orderId, orderId));
+    if (customerUserId) {
+      conditions.push(eq(prescriptions.customerUserId, customerUserId));
+    }
     if (status) conditions.push(eq(prescriptions.status, status));
     if (searchCondition) conditions.push(searchCondition);
 
@@ -434,6 +446,13 @@ export class OrdersClient {
         customerId: users.id,
         customerName: users.fullName,
         id: prescriptions.id,
+        latestNote: sql<string | null>`(
+          select pr.notes
+          from prescription_reviews pr
+          where pr.prescription_id = ${prescriptions.id}
+          order by pr.reviewed_at desc
+          limit 1
+        )`,
         orderId: orders.id,
         orderNumber: orders.orderNumber,
         orderStatus: orders.status,
@@ -460,6 +479,7 @@ export class OrdersClient {
           name: row.customerName ?? null,
         },
         id: row.id,
+        latestNote: row.latestNote ?? null,
         order: {
           id: row.orderId,
           orderNumber: row.orderNumber,
@@ -552,6 +572,12 @@ export class OrdersClient {
       }
 
       if (nextOrderStatus) {
+        if (nextOrderStatus === "AWAITING_PAYMENT") {
+          await inventoryWorkflow.reserveOrderStockTx(tx, order.id, {
+            actorUserId: input.actorUserId,
+          });
+        }
+
         await tx
           .update(orders)
           .set({
@@ -964,6 +990,10 @@ export class OrdersClient {
           };
         }),
       );
+
+      await inventoryWorkflow.recordCounterSaleTx(tx, order.id, {
+        actorUserId: actor.actorUserId,
+      });
 
       // 5. Create payment (immediately PAID).
       const [payment] = await tx

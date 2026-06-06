@@ -12,6 +12,7 @@ import {
   auditLogs,
   medicineBatches,
   medicineCategories,
+  medicineImages,
   medicines,
   orderItems,
   stockMovements,
@@ -95,6 +96,17 @@ export type MedicineListItem = {
   totalAvailable: number;
   totalReserved: number;
   unit: string;
+};
+
+export type MedicineImageItem = {
+  altText: string | null;
+  id: string;
+  isPrimary: boolean;
+  url: string | null;
+};
+
+export type MedicineDetail = MedicineListItem & {
+  images: MedicineImageItem[];
 };
 
 export type CategoryListItem = {
@@ -288,6 +300,31 @@ export class MedicinesClient {
     }
 
     return medicine;
+  }
+
+  async getMedicineDetailBySlug(slug: string): Promise<MedicineDetail> {
+    const medicine = await this.getMedicineBySlug(slug);
+
+    const imageRows = await readDb
+      .select({
+        altText: medicineImages.altText,
+        id: medicineImages.id,
+        isPrimary: medicineImages.isPrimary,
+        url: medicineImages.publicUrl,
+      })
+      .from(medicineImages)
+      .where(eq(medicineImages.medicineId, medicine.id))
+      .orderBy(desc(medicineImages.isPrimary), asc(medicineImages.createdAt));
+
+    return {
+      ...medicine,
+      images: imageRows.map((row) => ({
+        altText: row.altText ?? null,
+        id: row.id,
+        isPrimary: row.isPrimary,
+        url: row.url ?? null,
+      })),
+    };
   }
 
   async getCategory(id: string): Promise<CategoryListItem> {

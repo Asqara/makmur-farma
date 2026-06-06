@@ -25,9 +25,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   AppShell,
@@ -70,6 +70,11 @@ type NotificationOverviewRecord = {
   message: string;
   severity: "critical" | "info" | "success" | "warning";
   title: string;
+};
+
+type StockSyncWatermark = {
+  latestMovementAt: Date | string | null;
+  latestMovementId: string | null;
 };
 
 function getTitle(pathname: string) {
@@ -180,6 +185,45 @@ function useNotificationOverview(enabled: boolean) {
     queryKey: ["notifications", "overview"],
     refetchInterval: 10_000,
   });
+}
+
+function useStockSync(enabled: boolean) {
+  const queryClient = useQueryClient();
+  const latestMovementIdRef = useRef<string | null>(null);
+  const query = useQuery({
+    enabled,
+    queryFn: async () => {
+      const response = await eden.api.v1.inventory["stock-sync"].get();
+
+      if (response.error) throw response.error;
+
+      return response.data as StockSyncWatermark;
+    },
+    queryKey: ["inventory", "stock-sync"],
+    refetchInterval: 5_000,
+  });
+
+  useEffect(() => {
+    const latestMovementId = query.data?.latestMovementId ?? null;
+
+    if (!latestMovementId) return;
+
+    if (latestMovementIdRef.current === null) {
+      latestMovementIdRef.current = latestMovementId;
+      return;
+    }
+
+    if (latestMovementIdRef.current === latestMovementId) return;
+
+    latestMovementIdRef.current = latestMovementId;
+    void queryClient.invalidateQueries({ queryKey: ["batches"] });
+    void queryClient.invalidateQueries({ queryKey: ["batches-expiry"] });
+    void queryClient.invalidateQueries({ queryKey: ["stock-movements"] });
+    void queryClient.invalidateQueries({ queryKey: ["medicines"] });
+    void queryClient.invalidateQueries({ queryKey: ["orders"] });
+    void queryClient.invalidateQueries({ queryKey: ["payments"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  }, [query.data?.latestMovementId, queryClient]);
 }
 
 function getNotificationDotClassName(
@@ -315,9 +359,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const canReadNotifications = user
     ? hasPermission(user.role, "notification.read")
     : false;
+  const canSyncStock = user ? hasPermission(user.role, "batch.read") : false;
   const canUseOperationalShell = user
     ? OPERATIONAL_ROLE_VALUES.includes(user.role)
     : false;
+
+  useStockSync(Boolean(user && canUseOperationalShell && canSyncStock));
 
   let navGroups: AppShellNavGroup[] = [];
   let userMenu: ReactNode = null;

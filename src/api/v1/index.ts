@@ -23,6 +23,7 @@ import {
   Payments,
   Prescriptions,
   Reports,
+  Users,
 } from "@/zod-schemas";
 import { ENV } from "@/constants/config";
 
@@ -144,7 +145,7 @@ export const v1Api = new Elysia()
         }),
       )
       .get("/medicines/:slug", async ({ params }) =>
-        client.medicines.getMedicineBySlug(params.slug),
+        client.medicines.getMedicineDetailBySlug(params.slug),
       )
       .get("/categories", async ({ query }) =>
         client.medicines.listCategories({
@@ -304,11 +305,48 @@ export const v1Api = new Elysia()
 
     return client.customers.get(parsedParams.id);
   })
+  .get("/api/v1/users", async ({ request, query }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "user.read");
+    requireRole(session, ["ADMIN"]);
+
+    return client.users.list(query as Record<string, unknown>);
+  })
+  .post("/api/v1/users", async ({ body, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "user.write");
+    requireRole(session, ["ADMIN"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+
+    return client.users.create(
+      parseBody(Users.create, body),
+      getMutationActor(session, request),
+    );
+  })
+  .put("/api/v1/users/:id", async ({ body, params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "user.write");
+    requireRole(session, ["ADMIN"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+
+    return client.users.update(
+      parsedParams.id,
+      parseBody(Users.update, body),
+      getMutationActor(session, request),
+    );
+  })
   .get("/api/v1/batches", async ({ request, query }) => {
     const session = await requireSession(request);
     requirePermission(session, "batch.read");
 
     return client.medicines.listBatches(query as Record<string, unknown>);
+  })
+  .get("/api/v1/inventory/stock-sync", async ({ request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "batch.read");
+
+    return client.inventory.getStockSyncWatermark();
   })
   .post("/api/v1/batches", async ({ body, request }) => {
     const session = await requireSession(request);
@@ -532,6 +570,17 @@ export const v1Api = new Elysia()
 
     return client.reports.list(query as Record<string, unknown>);
   })
+  .get("/api/v1/reports/:id/download", async ({ params, request, set }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "report.read");
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const file = await client.reports.getDownload(parsedParams.id);
+
+    set.headers["Content-Type"] = "application/pdf";
+    set.headers["Content-Disposition"] = `attachment; filename="${file.filename}"`;
+
+    return new Response(file.bytes);
+  })
   .post("/api/v1/reports", async ({ body, request }) => {
     const session = await requireSession(request);
     requirePermission(session, "report.generate");
@@ -632,6 +681,24 @@ export const v1Api = new Elysia()
     requirePermission(session, "audit_log.read");
 
     return client.auditLogs.list(query as Record<string, unknown>);
+  })
+  .get("/api/v1/account/orders", async ({ request, query }) => {
+    const session = await requireSession(request);
+    requireRole(session, ["CUSTOMER"]);
+
+    return client.orders.listOrders({
+      ...(query as Record<string, unknown>),
+      customerUserId: session.userId,
+    });
+  })
+  .get("/api/v1/account/prescriptions", async ({ request, query }) => {
+    const session = await requireSession(request);
+    requireRole(session, ["CUSTOMER"]);
+
+    return client.orders.listPrescriptions({
+      ...(query as Record<string, unknown>),
+      customerUserId: session.userId,
+    });
   })
   .get("/api/v1/cart", async ({ request }) => {
     const session = await requireSession(request);

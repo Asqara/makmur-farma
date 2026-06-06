@@ -35,6 +35,9 @@ const JOB_SORT_FIELDS = {
   status: jobRuns.status,
 } as const;
 
+const WORKER_HEARTBEAT_KEY = "makmur-farma:worker:heartbeat";
+const WORKER_HEARTBEAT_STALE_MS = 45_000;
+
 export type JobListItem = {
   attempt: number;
   completedAt: Date | null;
@@ -179,6 +182,7 @@ export class JobsClient {
     // ── Redis health check ───────────────────────────────────────────────────
     let redisStatus: ServiceHealth["status"] = "unknown";
     let redisMetric = "Tidak dikonfigurasi";
+    let workerHeartbeat: { timestamp?: string } | null = null;
 
     if (ENV.redisUrl) {
       const redisClient = new IORedis(ENV.redisUrl, {
@@ -191,6 +195,10 @@ export class JobsClient {
       try {
         await redisClient.connect();
         await redisClient.ping();
+        const heartbeatText = await redisClient.get(WORKER_HEARTBEAT_KEY);
+        if (heartbeatText) {
+          workerHeartbeat = JSON.parse(heartbeatText) as { timestamp?: string };
+        }
         const latency = Date.now() - redisStart;
         redisStatus = "healthy";
         redisMetric = `${latency} ms`;
@@ -203,8 +211,21 @@ export class JobsClient {
     }
 
     // ── Worker / queue health check ──────────────────────────────────────────
-    let workerStatus: ServiceHealth["status"] = "healthy";
-    let workerMetric = "Tidak ada job stalled";
+    let workerStatus: ServiceHealth["status"] = "unknown";
+    let workerMetric = "Heartbeat belum tersedia";
+
+    if (workerHeartbeat?.timestamp) {
+      const heartbeatAge = Date.now() - new Date(workerHeartbeat.timestamp).getTime();
+      workerStatus =
+        heartbeatAge <= WORKER_HEARTBEAT_STALE_MS ? "healthy" : "degraded";
+      workerMetric =
+        heartbeatAge <= WORKER_HEARTBEAT_STALE_MS
+          ? `Heartbeat ${Math.max(0, Math.round(heartbeatAge / 1000))} detik lalu`
+          : "Heartbeat stale";
+    } else if (ENV.redisUrl && redisStatus !== "healthy") {
+      workerStatus = "unknown";
+      workerMetric = "Redis tidak dapat dibaca";
+    }
 
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     let stalledCount = 0;

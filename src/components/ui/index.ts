@@ -13,6 +13,7 @@ export * from "./domain-cards";
 export * from "./empty-state";
 export * from "./error-state";
 export * from "./field";
+export * from "./image-gallery";
 export * from "./import-stepper";
 export * from "./monitoring-health-card";
 export * from "./pagination";

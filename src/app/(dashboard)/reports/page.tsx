@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import {
+  ButtonLink,
   Card,
   CardContent,
   DataTable,
@@ -76,6 +77,7 @@ export default function ReportsPage() {
                   <TableHead>File</TableHead>
                   <TableHead>Dibuat</TableHead>
                   <TableHead>Selesai</TableHead>
+                  <TableHead>Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -95,6 +97,19 @@ export default function ReportsPage() {
                     <TableCell>{formatDateTime(report.createdAt)}</TableCell>
                     <TableCell>
                       {report.completedAt ? formatDateTime(report.completedAt) : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {report.status === "COMPLETED" && report.filename ? (
+                        <ButtonLink
+                          href={`/api/v1/reports/${report.id}/download`}
+                          size="sm"
+                          variant="secondary"
+                        >
+                          Download
+                        </ButtonLink>
+                      ) : (
+                        "-"
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

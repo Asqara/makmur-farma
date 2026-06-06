@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { LogOut, PackageSearch, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,12 +15,25 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  EmptyState,
+  ErrorState,
   Skeleton,
+  StatusBadge,
 } from "@/components/ui";
 import { APP_META_DESCRIPTION, APP_NAME } from "@/constants/app";
 import { USER_ROLE_LABELS, USER_STATUS_LABELS } from "@/constants/auth";
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_STATUS_TONES,
+  PRESCRIPTION_STATUS_LABELS,
+  PRESCRIPTION_STATUS_TONES,
+  type OrderStatus,
+  type PrescriptionStatus,
+} from "@/constants/domain";
 import { ROUTES } from "@/constants/routes";
 import { isUnauthorizedError, useAuth } from "@/hooks/useAuth";
+import { eden } from "@/lib/eden";
+import { formatRp } from "@/utils/formatRp";
 
 function formatDateTime(value: Date | string | null | undefined) {
   if (!value) return "-";
@@ -30,6 +44,33 @@ function formatDateTime(value: Date | string | null | undefined) {
   }).format(new Date(value));
 }
 
+type AccountOrdersResponse = {
+  data: Array<{
+    createdAt: Date | string;
+    grandTotal: string;
+    id: string;
+    itemCount: number;
+    orderNumber: string;
+    prescriptionRequired: boolean;
+    status: OrderStatus;
+  }>;
+};
+
+type AccountPrescriptionsResponse = {
+  data: Array<{
+    id: string;
+    latestNote: string | null;
+    order: {
+      id: string;
+      orderNumber: string;
+      status: OrderStatus;
+    };
+    originalFileName: string;
+    status: PrescriptionStatus;
+    submittedAt: Date | string;
+  }>;
+};
+
 /**
  * Protected customer account page.
  */
@@ -37,6 +78,28 @@ export default function AccountPage() {
   const auth = useAuth();
   const router = useRouter();
   const user = auth.data?.user;
+  const ordersQuery = useQuery({
+    enabled: Boolean(user && user.role === "CUSTOMER"),
+    queryFn: async () => {
+      const response = await eden.api.v1.account.orders.get({
+        query: { limit: "5", page: "1", sortBy: "createdAt", sortDir: "desc" },
+      });
+      if (response.error) throw response.error;
+      return response.data as AccountOrdersResponse;
+    },
+    queryKey: ["account", "orders"],
+  });
+  const prescriptionsQuery = useQuery({
+    enabled: Boolean(user && user.role === "CUSTOMER"),
+    queryFn: async () => {
+      const response = await eden.api.v1.account.prescriptions.get({
+        query: { limit: "5", page: "1", sortBy: "submittedAt", sortDir: "desc" },
+      });
+      if (response.error) throw response.error;
+      return response.data as AccountPrescriptionsResponse;
+    },
+    queryKey: ["account", "prescriptions"],
+  });
 
   useEffect(() => {
     if (auth.isError && isUnauthorizedError(auth.error)) {
@@ -137,12 +200,121 @@ export default function AccountPage() {
               <section className="grid gap-1">
                 <CardTitle>Pesanan Saya</CardTitle>
                 <p className="ts-sm text-text-muted">
-                  Riwayat pesanan akan ditampilkan setelah modul pesanan
-                  pelanggan tersedia.
+                  Riwayat pesanan online dan transaksi kasir yang terhubung
+                  dengan akun Anda.
                 </p>
               </section>
             </section>
           </CardHeader>
+          <CardContent>
+            {ordersQuery.isError ? (
+              <ErrorState
+                description="Riwayat pesanan gagal dimuat."
+                onRetry={() => ordersQuery.refetch()}
+                title="Riwayat Tidak Tersedia"
+              />
+            ) : ordersQuery.data?.data.length ? (
+              <section className="grid gap-3">
+                {ordersQuery.data.data.map((order) => (
+                  <article
+                    className="grid gap-2 rounded-lg border border-border-default p-4 md:grid-cols-[1fr_auto]"
+                    key={order.id}
+                  >
+                    <section className="grid gap-1">
+                      <p className="ts-sm font-semibold text-text-strong">
+                        {order.orderNumber}
+                      </p>
+                      <p className="ts-xs text-text-muted">
+                        {formatDateTime(order.createdAt)} - {order.itemCount} item
+                      </p>
+                      <p className="ts-sm font-semibold text-text-strong">
+                        {formatRp(Number(order.grandTotal))}
+                      </p>
+                    </section>
+                    <section className="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={ORDER_STATUS_LABELS[order.status]}
+                        tone={ORDER_STATUS_TONES[order.status]}
+                      />
+                      {order.prescriptionRequired ? (
+                        <StatusBadge label="Perlu Resep" tone="warning" />
+                      ) : null}
+                    </section>
+                  </article>
+                ))}
+              </section>
+            ) : ordersQuery.isLoading ? (
+              <Skeleton className="h-24" />
+            ) : (
+              <EmptyState
+                description="Belum ada pesanan yang terhubung dengan akun Anda."
+                title="Belum Ada Pesanan"
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <section className="flex items-start gap-3">
+              <span className="grid size-10 place-items-center rounded-lg bg-warning-bg text-warning">
+                <PackageSearch aria-hidden="true" className="size-5" />
+              </span>
+              <section className="grid gap-1">
+                <CardTitle>Riwayat Resep</CardTitle>
+                <p className="ts-sm text-text-muted">
+                  Status resep, catatan aman terakhir dari Apoteker, dan
+                  hubungan ke pesanan.
+                </p>
+              </section>
+            </section>
+          </CardHeader>
+          <CardContent>
+            {prescriptionsQuery.isError ? (
+              <ErrorState
+                description="Riwayat resep gagal dimuat."
+                onRetry={() => prescriptionsQuery.refetch()}
+                title="Resep Tidak Tersedia"
+              />
+            ) : prescriptionsQuery.data?.data.length ? (
+              <section className="grid gap-3">
+                {prescriptionsQuery.data.data.map((prescription) => (
+                  <article
+                    className="grid gap-2 rounded-lg border border-border-default p-4"
+                    key={prescription.id}
+                  >
+                    <section className="flex flex-wrap items-center justify-between gap-2">
+                      <section>
+                        <p className="ts-sm font-semibold text-text-strong">
+                          {prescription.originalFileName}
+                        </p>
+                        <p className="ts-xs text-text-muted">
+                          Pesanan {prescription.order.orderNumber} -{" "}
+                          {formatDateTime(prescription.submittedAt)}
+                        </p>
+                      </section>
+                      <StatusBadge
+                        label={PRESCRIPTION_STATUS_LABELS[prescription.status]}
+                        tone={PRESCRIPTION_STATUS_TONES[prescription.status]}
+                      />
+                    </section>
+                    {prescription.latestNote ? (
+                      <p className="ts-sm rounded-lg bg-muted-surface p-3 text-text-default">
+                        {prescription.latestNote}
+                      </p>
+                    ) : null}
+                  </article>
+                ))}
+              </section>
+            ) : prescriptionsQuery.isLoading ? (
+              <Skeleton className="h-24" />
+            ) : (
+              <EmptyState
+                description="Belum ada resep yang diunggah dari akun Anda."
+                title="Belum Ada Resep"
+              />
+            )}
+          </CardContent>
         </Card>
       </section>
     </main>

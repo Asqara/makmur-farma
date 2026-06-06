@@ -1,9 +1,9 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ShoppingCart } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import {
@@ -15,6 +15,7 @@ import {
   CardContent,
   EmptyState,
   ErrorState,
+  ImageGallery,
   Skeleton,
   StatusBadge,
 } from "@/components/ui";
@@ -24,11 +25,19 @@ import { eden } from "@/lib/eden";
 import { formatRp } from "@/utils/formatRp";
 import { formatStockQuantity } from "@/utils/inventoryDisplay";
 
+type MedicineImage = {
+  altText: string | null;
+  id: string;
+  isPrimary: boolean;
+  url: string | null;
+};
+
 type MedicineDetail = {
   category: { name: string | null };
   criticalStockThreshold: number;
   description?: string | null;
   id: string;
+  images: MedicineImage[];
   lowStockThreshold: number;
   name: string;
   prescriptionRequired: boolean;
@@ -52,12 +61,30 @@ function availabilityLabel(totalAvailable: number, lowStockThreshold: number) {
   return "Tersedia";
 }
 
+function buildGalleryImages(medicine: MedicineDetail): MedicineImage[] {
+  if (medicine.images && medicine.images.length > 0) {
+    return medicine.images;
+  }
+
+  if (medicine.primaryImageUrl) {
+    return [
+      {
+        altText: medicine.name,
+        id: "primary",
+        isPrimary: true,
+        url: medicine.primaryImageUrl,
+      },
+    ];
+  }
+
+  return [];
+}
+
 /**
- * Customer-facing medicine detail page.
+ * Customer-facing medicine detail page with image gallery.
  */
 export default function CatalogDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const cart = useCart();
   const slug = typeof params.slug === "string" ? params.slug : "";
   const [quantity, setQuantity] = useState(1);
@@ -83,16 +110,17 @@ export default function CatalogDetailPage() {
     try {
       await cart.addItem({
         medicineId: query.data.id,
-        quantity,
         name: query.data.name,
         price: Number(query.data.sellingPrice),
         prescriptionRequired: query.data.prescriptionRequired,
+        quantity,
         unit: query.data.unit,
       });
       setAddedMessage("Obat berhasil ditambahkan ke keranjang!");
       setTimeout(() => setAddedMessage(null), 3000);
-    } catch (error: any) {
-      setAddedMessage(error.message || "Gagal menambahkan ke keranjang.");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : null;
+      setAddedMessage(msg || "Gagal menambahkan ke keranjang.");
     } finally {
       setIsAdding(false);
     }
@@ -142,9 +170,15 @@ export default function CatalogDetailPage() {
           />
         ) : query.isLoading ? (
           <section className="grid gap-6 md:grid-cols-[1fr_1.2fr]">
-            <Skeleton className="aspect-[4/3] w-full rounded-xl" />
-            <section className="grid gap-4">
-              <Skeleton className="h-6 w-1/3" />
+            <section className="grid gap-3">
+              <Skeleton className="aspect-4/3 w-full rounded-xl" />
+              <section className="flex gap-2">
+                <Skeleton className="size-16 rounded-lg" />
+                <Skeleton className="size-16 rounded-lg" />
+              </section>
+            </section>
+            <section className="grid gap-4 content-start">
+              <Skeleton className="h-4 w-1/3" />
               <Skeleton className="h-8 w-3/4" />
               <Skeleton className="h-5 w-1/2" />
               <Skeleton className="h-16 w-full" />
@@ -158,20 +192,13 @@ export default function CatalogDetailPage() {
           />
         ) : (
           <section className="grid gap-6 md:grid-cols-[1fr_1.2fr]">
-            <section className="aspect-[4/3] overflow-hidden rounded-xl bg-muted-surface">
-              {medicine.primaryImageUrl ? (
-                <img
-                  alt={medicine.name}
-                  className="h-full w-full object-cover"
-                  src={medicine.primaryImageUrl}
-                />
-              ) : (
-                <section className="grid h-full place-items-center text-text-muted">
-                  <span className="ts-sm">Makmur Farma</span>
-                </section>
-              )}
-            </section>
+            {/* ── Gallery ──────────────────────────────────────────── */}
+            <ImageGallery
+              images={buildGalleryImages(medicine)}
+              name={medicine.name}
+            />
 
+            {/* ── Info ─────────────────────────────────────────────── */}
             <section className="grid content-start gap-4">
               <section className="grid gap-1">
                 <p className="ts-xs text-text-muted">
@@ -202,7 +229,12 @@ export default function CatalogDetailPage() {
               </strong>
 
               {medicine.description ? (
-                <p className="ts-sm text-text-default">{medicine.description}</p>
+                <section className="grid gap-1">
+                  <p className="ts-xs font-semibold uppercase tracking-wide text-text-muted">
+                    Deskripsi
+                  </p>
+                  <p className="ts-sm text-text-default">{medicine.description}</p>
+                </section>
               ) : null}
 
               {medicine.prescriptionRequired ? (
@@ -235,7 +267,7 @@ export default function CatalogDetailPage() {
                   >
                     −
                   </button>
-                  <span className="ts-sm min-w-[2.5rem] text-center font-medium text-text-strong">
+                  <span className="ts-sm min-w-10 text-center font-medium text-text-strong">
                     {quantity}
                   </span>
                   <button

@@ -18,8 +18,11 @@ import { db, readDb } from "@/lib/db";
 import { ForbiddenError, NotFoundAppError, ValidationAppError } from "@/lib/errors";
 import type { RequestContext } from "@/lib/request";
 import type { UserRole } from "@/constants/auth";
+import { InventoryWorkflowClient } from "./inventory";
 
 export type SimulateOutcome = "PAID" | "FAILED" | "EXPIRED";
+
+const inventoryWorkflow = new InventoryWorkflowClient();
 
 export type InitializeQrisResult = {
   qrPayload: string;
@@ -213,6 +216,10 @@ export class QrisSimulatorClient {
       if (outcome === "PAID") {
         const paidStatus = "PAID";
 
+        await inventoryWorkflow.fulfillOrderReservationsTx(tx, order.id, {
+          actorUserId: actor.actorUserId,
+        });
+
         await tx
           .update(orders)
           .set({ status: paidStatus, updatedAt: now })
@@ -254,6 +261,15 @@ export class QrisSimulatorClient {
           });
         }
       } else {
+        await inventoryWorkflow.releaseOrderReservationsTx(
+          tx,
+          order.id,
+          outcome === "FAILED"
+            ? "Reservasi dilepas karena pembayaran gagal."
+            : "Reservasi dilepas karena pembayaran kedaluwarsa.",
+          { actorUserId: actor.actorUserId },
+        );
+
         // FAILED / EXPIRED — cancel the order.
         const cancelStatus = "CANCELLED";
 

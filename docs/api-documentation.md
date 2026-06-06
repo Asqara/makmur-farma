@@ -506,6 +506,18 @@ Requires `x-csrf-token`.
 
 Creates a queued report record for background generation.
 
+### `GET /api/v1/reports/:id/download`
+
+Permission: `report.read`.
+
+Downloads the generated PDF when the report run is completed.
+
+### `GET /api/v1/inventory/stock-sync`
+
+Permission: `batch.read`.
+
+Returns the latest stock movement watermark used by the dashboard shell for near-real-time stock refresh.
+
 ### `GET /api/v1/imports`
 
 Permission: `import.read`.
@@ -518,7 +530,7 @@ Permission: `import.run`.
 
 Requires `x-csrf-token`.
 
-Creates an import run record. Actual row processing is delegated to worker implementation.
+Creates an import run record. Row processing is delegated to the worker, which records row-level import results.
 
 ### `GET /api/v1/imports/:id/rows`
 
@@ -536,7 +548,7 @@ Returns persisted background job records.
 
 Permission: `monitoring.read`.
 
-Returns API/database/worker health derived from runtime and persisted job/error data. CPU and memory are not shown because no real data source is wired yet.
+Returns API/database/worker health derived from runtime, Redis worker heartbeat, and persisted job/error data. CPU and memory are not shown because no real data source is wired yet.
 
 ### `GET /api/v1/error-logs`
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { USER_ROLE_VALUES, USER_STATUS_VALUES } from "@/constants/auth";
 import {
   ERROR_SEVERITY_VALUES,
   JOB_STATUS_VALUES,
@@ -417,6 +418,30 @@ export class Imports {
 }
 
 /**
+ * Admin user-management schemas.
+ */
+export class Users {
+  static create = z.object({
+    email: EMAIL_SCHEMA,
+    fullName: FULL_NAME_SCHEMA,
+    markEmailVerified: z.boolean().default(true),
+    password: PASSWORD_STRENGTH_SCHEMA,
+    phone: PHONE_SCHEMA.optional().or(z.literal("")),
+    role: z.enum(USER_ROLE_VALUES),
+    status: z.enum(USER_STATUS_VALUES).default("ACTIVE"),
+  });
+
+  static update = z
+    .object({
+      fullName: FULL_NAME_SCHEMA.optional(),
+      phone: PHONE_SCHEMA.optional().or(z.literal("")),
+      role: z.enum(USER_ROLE_VALUES).optional(),
+      status: z.enum(USER_STATUS_VALUES).optional(),
+    })
+    .refine(atLeastOneField, "Minimal satu field harus diperbarui.");
+}
+
+/**
  * Application error log mutation schemas.
  */
 export class ErrorLogs {
@@ -503,3 +528,5 @@ export type SupplierUpdateInput = z.infer<typeof MasterData.supplierUpdate>;
 export type StockReceiptInput = z.infer<typeof Inventory.stockReceipt>;
 export type StockAdjustmentInput = z.infer<typeof Inventory.stockAdjustment>;
 export type BlockBatchInput = z.infer<typeof Inventory.blockBatch>;
+export type UserCreateInput = z.infer<typeof Users.create>;
+export type UserUpdateInput = z.infer<typeof Users.update>;

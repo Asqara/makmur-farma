@@ -76,8 +76,8 @@ Implemented source:
   - `@src/app/(dashboard)/reports/page.tsx`
 
 The worker is wired to BullMQ with bounded retries and exponential backoff.
-Domain-specific handlers for final PDF generation, row-level import processing, and email delivery are intentionally not marked complete until implemented.
-Unsupported handlers record safe final failure instead of pretending the business effect succeeded.
+It generates sales report PDFs, processes CSV/XLSX import rows, records row-level import results, publishes a Redis heartbeat, and runs maintenance scans for expired payments and stock reservations.
+Notification delivery handlers still record safe final failure until a delivery channel is implemented.
 
 ## Tests
 
@@ -102,6 +102,6 @@ Test files:
 - Full CRUD mutation forms for medicines/categories/suppliers are not yet implemented.
 - Checkout/cart mutation endpoints are not yet implemented.
 - Payment provider callback verification is represented by domain rules and schema, but no provider adapter is active.
-- Report PDF rendering is not yet implemented.
-- CSV/XLSX row parsing and chunked worker processing are not yet implemented.
+- Report PDF rendering is implemented by the worker with private file storage and a protected download endpoint.
+- CSV/XLSX row parsing and row-level result processing are implemented by the worker.
 - Visual QA requires a migrated database and runnable local app session.

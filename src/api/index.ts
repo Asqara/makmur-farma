@@ -7,6 +7,21 @@ import { v1Api } from "./v1";
 import { ENV } from "@/constants/config";
 import { AppError } from "@/lib/errors";
 
+function isPublicApiError(
+  error: unknown,
+): error is { code: string; publicMessage: string; statusCode: number } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    "publicMessage" in error &&
+    "statusCode" in error &&
+    typeof (error as { code: unknown }).code === "string" &&
+    typeof (error as { publicMessage: unknown }).publicMessage === "string" &&
+    typeof (error as { statusCode: unknown }).statusCode === "number"
+  );
+}
+
 /**
  * Makmur Farma Elysia API mounted by the Next.js catch-all route.
  */
@@ -62,6 +77,15 @@ export const app = new Elysia()
   )
   .onError(({ error, set }) => {
     if (error instanceof AppError) {
+      set.status = error.statusCode;
+
+      return {
+        code: error.code,
+        message: error.publicMessage,
+      };
+    }
+
+    if (isPublicApiError(error)) {
       set.status = error.statusCode;
 
       return {
