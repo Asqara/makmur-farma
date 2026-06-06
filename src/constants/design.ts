@@ -72,6 +72,22 @@ export const STATUS_TONE_CLASS_NAMES: Record<StatusTone, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Overlay layering
+// ---------------------------------------------------------------------------
+
+/**
+ * Centralized overlay layers. Popovers are rendered above dialogs because
+ * select/date panels are portalled to document.body while their triggers may
+ * live inside modal content.
+ */
+export const OVERLAY_Z_INDEX_CLASS_NAMES = {
+  mobileDrawer: "z-[900]",
+  dialogBackdrop: "z-[1000]",
+  popover: "z-[1100]",
+  toast: "z-[1200]",
+} as const;
+
+// ---------------------------------------------------------------------------
 // Card
 // ---------------------------------------------------------------------------
 
@@ -135,7 +151,8 @@ export const SELECT_CLASS_NAMES = {
   value: "truncate text-text-strong",
   placeholder: "text-text-muted",
   panel: [
-    "z-50 grid max-h-64 overflow-y-auto rounded-xl border border-border-default",
+    OVERLAY_Z_INDEX_CLASS_NAMES.popover,
+    "grid max-h-64 overflow-y-auto rounded-xl border border-border-default",
     "bg-elevated-surface shadow-floating",
   ].join(" "),
   option: [
@@ -164,7 +181,8 @@ export const DATE_INPUT_CLASS_NAMES = {
   placeholder: "text-text-muted",
   icon: "pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-text-muted",
   panel: [
-    "z-50 rounded-xl border border-border-default bg-elevated-surface p-4 shadow-floating",
+    OVERLAY_Z_INDEX_CLASS_NAMES.popover,
+    "rounded-xl border border-border-default bg-elevated-surface p-4 shadow-floating",
   ].join(" "),
   weekDay: "ts-xs text-center font-medium text-text-muted",
   day: "ts-sm grid size-9 place-items-center rounded-lg text-text-default transition-colors hover:bg-muted-surface",

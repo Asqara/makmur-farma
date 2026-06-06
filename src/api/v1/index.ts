@@ -10,18 +10,21 @@ import {
 import { createAuthCookies, createClearAuthCookies } from "@/lib/session";
 import { assertSafeMutationOrigin, assertSessionCsrf } from "@/lib/csrf";
 import { getRequestContext } from "@/lib/request";
-import { ValidationAppError } from "@/lib/errors";
+import { ForbiddenError, ValidationAppError } from "@/lib/errors";
 import {
   Auth,
   Cart,
   ErrorLogs,
   Imports,
+  Inventory,
   MasterData,
   Notifications,
   Orders,
+  Payments,
   Prescriptions,
   Reports,
 } from "@/zod-schemas";
+import { ENV } from "@/constants/config";
 
 function setCookieHeaders(set: { headers: Record<string, string | number> }, cookies: string[]) {
   set.headers["Set-Cookie"] = cookies as unknown as string;
@@ -307,6 +310,48 @@ export const v1Api = new Elysia()
 
     return client.medicines.listBatches(query as Record<string, unknown>);
   })
+  .post("/api/v1/batches", async ({ body, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "batch.write");
+    assertSessionCsrf(request, session.csrfTokenHash);
+
+    return client.medicines.createStockReceipt(
+      parseBody(Inventory.stockReceipt, body),
+      getMutationActor(session, request),
+    );
+  })
+  .get("/api/v1/batches/:id", async ({ params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "batch.read");
+    const parsedParams = parseBody(MasterData.idParams, params);
+
+    return client.medicines.getBatch(parsedParams.id);
+  })
+  .post("/api/v1/batches/:id/adjust", async ({ body, params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "stock_adjustment.write");
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const input = parseBody(Inventory.stockAdjustment, body);
+
+    return client.medicines.adjustStock(
+      { ...input, batchId: parsedParams.id },
+      getMutationActor(session, request),
+    );
+  })
+  .post("/api/v1/batches/:id/block", async ({ body, params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "batch.write");
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const input = parseBody(Inventory.blockBatch, body);
+
+    return client.medicines.blockBatch(
+      parsedParams.id,
+      input.reason,
+      getMutationActor(session, request),
+    );
+  })
   .get("/api/v1/stock-movements", async ({ request, query }) => {
     const session = await requireSession(request);
     requirePermission(session, "stock_movement.read");
@@ -348,6 +393,57 @@ export const v1Api = new Elysia()
 
     return client.orders.listPayments(query as Record<string, unknown>);
   })
+  .get("/api/v1/payments/:id", async ({ params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "payment.read");
+    const parsedParams = parseBody(MasterData.idParams, params);
+
+    return client.qrisSimulator.getPaymentDetail(parsedParams.id);
+  })
+  .post("/api/v1/payments/:id/initialize-qris", async ({ body, params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "payment.read");
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const input = parseBody(Payments.initializeQris, body ?? {});
+
+    return client.qrisSimulator.initializeQrisPayment(parsedParams.id, input.amount);
+  })
+  .post("/api/v1/payments/:id/override", async ({ body, params, request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "payment.process");
+    requireRole(session, ["ADMIN"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const input = parseBody(Payments.override, body);
+
+    return client.orders.adminOverridePayment(
+      parsedParams.id,
+      input.overrideStatus,
+      input.reason,
+      session.userId,
+    );
+  })
+  .post("/api/v1/payments/:id/simulate", async ({ body, params, request }) => {
+    if (!ENV.enablePaymentSimulator) {
+      throw new ForbiddenError("Simulator pembayaran tidak aktif.");
+    }
+
+    const session = await requireSession(request);
+    requirePermission(session, "payment.read");
+    requireRole(session, ["ADMIN", "CASHIER"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const input = parseBody(Payments.simulateCallback, body);
+
+    await client.qrisSimulator.simulateCallback(
+      parsedParams.id,
+      input.outcome,
+      getMutationActor(session, request),
+    );
+
+    return { ok: true };
+  })
   .get("/api/v1/prescriptions", async ({ request, query }) => {
     const session = await requireSession(request);
     requirePermission(session, "prescription.read");
@@ -374,6 +470,17 @@ export const v1Api = new Elysia()
       role: session.user.role,
       userId: session.userId,
     });
+  })
+  .get("/api/v1/notifications/unread-count", async ({ request }) => {
+    const session = await requireSession(request);
+    requirePermission(session, "notification.read");
+
+    const count = await client.notifications.getUnreadCount({
+      role: session.user.role,
+      userId: session.userId,
+    });
+
+    return { count };
   })
   .post("/api/v1/notifications/:id/read", async ({ params, request }) => {
     const session = await requireSession(request);
@@ -580,4 +687,22 @@ export const v1Api = new Elysia()
       input.fulfillmentMethod,
       input.idempotencyKey,
     );
+  })
+  .post("/api/v1/cashier/checkout", async ({ body, request }) => {
+    const session = await requireSession(request);
+    requireRole(session, ["CASHIER", "ADMIN"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+
+    const input = parseBody(Orders.cashierCheckout, body);
+
+    return client.orders.createCashierOrder(input, getMutationActor(session, request));
+  })
+  .post("/api/v1/cart/merge", async ({ body, request }) => {
+    const session = await requireSession(request);
+    requireRole(session, ["CUSTOMER"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+
+    const input = parseBody(Cart.merge, body);
+
+    return client.cart.mergeLocalCart(session.userId, input.items);
   });

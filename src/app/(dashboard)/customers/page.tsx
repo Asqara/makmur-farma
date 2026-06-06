@@ -21,6 +21,7 @@ import {
   TextInput,
 } from "@/components/ui";
 import { USER_STATUS_LABELS, type UserStatus } from "@/constants/auth";
+import { useDebounce } from "@/hooks/useDebounce";
 import { eden } from "@/lib/eden";
 import { formatDateTime } from "@/utils/inventoryDisplay";
 
@@ -45,13 +46,14 @@ const statusTone: Record<UserStatus, "danger" | "neutral" | "success" | "warning
 
 export default function CustomersPage() {
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search.trim(), 300);
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.customers.get({
         query: {
           limit: "30",
           page: "1",
-          search,
+          search: debouncedSearch,
           sortBy: "createdAt",
           sortDir: "desc",
         },
@@ -61,7 +63,7 @@ export default function CustomersPage() {
 
       return response.data as CustomersResponse;
     },
-    queryKey: ["customers", search],
+    queryKey: ["customers", debouncedSearch],
   });
 
   return (

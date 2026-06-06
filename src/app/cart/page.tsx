@@ -19,120 +19,31 @@ import {
 } from "@/components/ui";
 import { ROUTES } from "@/constants/routes";
 import { eden } from "@/lib/eden";
+import { useCart } from "@/hooks/useCart";
 import { formatRp } from "@/utils/formatRp";
-
-type CartItem = {
-  cartId: string;
-  id: string;
-  medicine: {
-    id: string;
-    name: string;
-    prescriptionRequired: boolean;
-    sellingPrice: string;
-    totalAvailable: number;
-    unit: string;
-  };
-  quantity: number;
-};
-
-type CartResponse = {
-  id: string;
-  items: CartItem[];
-  status: string;
-};
 
 /**
  * Customer shopping cart page.
  */
 export default function CartPage() {
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const cart = useCart();
 
-  const cartQuery = useQuery({
-    queryFn: async () => {
-      const response = await eden.api.v1.cart.get();
-
-      if (response.error) throw response.error;
-
-      return response.data as CartResponse;
-    },
-    queryKey: ["cart"],
-    retry: false,
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({
-      itemId,
-      quantity,
-    }: {
-      itemId: string;
-      quantity: number;
-    }) => {
-      const response = await eden.api.v1.cart.items({ itemId }).put({
-        quantity,
-      });
-
-      if (response.error) {
-        const message =
-          (response.error as { publicMessage?: string }).publicMessage ??
-          "Gagal memperbarui item.";
-        throw new Error(message);
-      }
-
-      return response.data;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["cart"], data);
-    },
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: async (itemId: string) => {
-      const response = await eden.api.v1.cart.items({ itemId }).delete();
-
-      if (response.error) {
-        const message =
-          (response.error as { publicMessage?: string }).publicMessage ??
-          "Gagal menghapus item.";
-        throw new Error(message);
-      }
-
-      return response.data;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["cart"], data);
-    },
-  });
-
-  const clearMutation = useMutation({
-    mutationFn: async () => {
-      const response = await eden.api.v1.cart.delete();
-
-      if (response.error) {
-        const message =
-          (response.error as { publicMessage?: string }).publicMessage ??
-          "Gagal mengosongkan keranjang.";
-        throw new Error(message);
-      }
-
-      return response.data;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["cart"], data);
-    },
-  });
-
-  const cart = cartQuery.data;
-  const items: CartItem[] = cart?.items ?? [];
+  const items = cart.items;
 
   const subtotal = items.reduce((sum, item) => {
-    return sum + Number(item.medicine.sellingPrice) * item.quantity;
+    return sum + item.price * item.quantity;
   }, 0);
 
-  const isMutating =
-    updateMutation.isPending ||
-    removeMutation.isPending ||
-    clearMutation.isPending;
+  const isMutating = cart.isLoading;
+
+  const handleCheckout = () => {
+    if (!cart.isAuthenticated) {
+      router.push(`${ROUTES.LOGIN}?redirectTo=/checkout`);
+    } else {
+      router.push("/checkout");
+    }
+  };
 
   return (
     <main className="min-h-screen bg-page-background">
@@ -142,9 +53,9 @@ export default function CartPage() {
           <nav className="flex items-center gap-2">
             <Link
               className="ts-sm rounded-lg px-3 py-2 text-text-default hover:bg-muted-surface"
-              href={ROUTES.ACCOUNT}
+              href={cart.isAuthenticated ? ROUTES.ACCOUNT : ROUTES.LOGIN}
             >
-              Akun
+              {cart.isAuthenticated ? "Akun" : "Masuk"}
             </Link>
           </nav>
         </section>
@@ -153,13 +64,7 @@ export default function CartPage() {
       <section className="mx-auto max-w-5xl px-4 py-6 md:px-6">
         <h1 className="ts-xl mb-6 font-bold text-text-strong">Keranjang Belanja</h1>
 
-        {cartQuery.isError ? (
-          <ErrorState
-            description="Keranjang gagal dimuat. Coba muat ulang halaman."
-            onRetry={() => cartQuery.refetch()}
-            title="Keranjang Tidak Tersedia"
-          />
-        ) : cartQuery.isLoading ? (
+        {cart.isLoading ? (
           <section className="grid gap-4">
             <Skeleton className="h-24 w-full" />
             <Skeleton className="h-24 w-full" />
@@ -178,24 +83,22 @@ export default function CartPage() {
           <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
             <section className="grid gap-3">
               {items.map((item) => (
-                <Card key={item.id}>
+                <Card key={item.medicineId}>
                   <CardContent className="flex items-start justify-between gap-4 py-4">
                     <section className="grid min-w-0 flex-1 gap-1">
                       <p className="ts-sm font-semibold text-text-strong truncate">
-                        {item.medicine.name}
+                        {item.name}
                       </p>
-                      {item.medicine.prescriptionRequired ? (
+                      {item.prescriptionRequired ? (
                         <p className="ts-xs text-warning">Perlu resep dokter</p>
                       ) : null}
                       <p className="ts-sm text-text-muted">
-                        {formatRp(Number(item.medicine.sellingPrice))} /{" "}
-                        {item.medicine.unit}
+                        {formatRp(item.price)} /{" "}
+                        {item.unit}
                       </p>
                       <p className="ts-sm font-semibold text-text-strong">
                         Subtotal:{" "}
-                        {formatRp(
-                          Number(item.medicine.sellingPrice) * item.quantity,
-                        )}
+                        {formatRp(item.price * item.quantity)}
                       </p>
                     </section>
 
@@ -206,8 +109,9 @@ export default function CartPage() {
                           className="grid size-8 place-items-center text-text-default transition-colors hover:bg-muted-surface disabled:opacity-40"
                           disabled={item.quantity <= 1 || isMutating}
                           onClick={() =>
-                            updateMutation.mutate({
-                              itemId: item.id,
+                            cart.updateQuantity({
+                              itemId: (item as any).itemId,
+                              medicineId: item.medicineId,
                               quantity: item.quantity - 1,
                             })
                           }
@@ -223,8 +127,9 @@ export default function CartPage() {
                           className="grid size-8 place-items-center text-text-default transition-colors hover:bg-muted-surface disabled:opacity-40"
                           disabled={isMutating}
                           onClick={() =>
-                            updateMutation.mutate({
-                              itemId: item.id,
+                            cart.updateQuantity({
+                              itemId: (item as any).itemId,
+                              medicineId: item.medicineId,
                               quantity: item.quantity + 1,
                             })
                           }
@@ -235,10 +140,10 @@ export default function CartPage() {
                       </section>
 
                       <button
-                        aria-label={`Hapus ${item.medicine.name} dari keranjang`}
+                        aria-label={`Hapus ${item.name} dari keranjang`}
                         className="grid size-8 place-items-center rounded-md text-text-muted transition-colors hover:bg-danger-surface hover:text-danger disabled:opacity-40"
                         disabled={isMutating}
-                        onClick={() => removeMutation.mutate(item.id)}
+                        onClick={() => cart.removeItem({ itemId: (item as any).itemId, medicineId: item.medicineId })}
                         type="button"
                       >
                         <Trash2 aria-hidden="true" className="size-4" />
@@ -251,7 +156,7 @@ export default function CartPage() {
               <Button
                 className="self-start"
                 disabled={isMutating}
-                onClick={() => clearMutation.mutate()}
+                onClick={() => cart.clearCart()}
                 size="sm"
                 variant="ghost"
               >
@@ -269,16 +174,14 @@ export default function CartPage() {
                     {items.map((item) => (
                       <section
                         className="flex items-center justify-between gap-2"
-                        key={item.id}
+                        key={item.medicineId}
                       >
                         <p className="ts-sm min-w-0 truncate text-text-default">
-                          {item.medicine.name}{" "}
+                          {item.name}{" "}
                           <span className="text-text-muted">×{item.quantity}</span>
                         </p>
                         <p className="ts-sm shrink-0 text-text-strong">
-                          {formatRp(
-                            Number(item.medicine.sellingPrice) * item.quantity,
-                          )}
+                          {formatRp(item.price * item.quantity)}
                         </p>
                       </section>
                     ))}
@@ -295,9 +198,13 @@ export default function CartPage() {
                     </p>
                   </section>
 
-                  <ButtonLink href="/checkout" variant="primary">
+                  <Button
+                    disabled={isMutating}
+                    onClick={handleCheckout}
+                    variant="primary"
+                  >
                     Lanjut ke Checkout
-                  </ButtonLink>
+                  </Button>
 
                   <ButtonLink
                     href={ROUTES.CATALOG.INDEX}

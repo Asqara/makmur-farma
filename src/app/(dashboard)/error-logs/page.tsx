@@ -14,6 +14,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  SelectInput,
   StatusBadge,
   TableBody,
   TableCell,
@@ -52,23 +53,48 @@ const severityTone = {
   warning: "warning",
 } as const;
 
+const SEVERITY_OPTIONS = [
+  { label: "Semua Severity", value: "" },
+  { label: "Critical", value: "critical" },
+  { label: "Warning", value: "warning" },
+  { label: "Info", value: "info" },
+];
+
+const STATUS_OPTIONS = [
+  { label: "Semua Status", value: "" },
+  { label: "Terbuka", value: "false" },
+  { label: "Selesai", value: "true" },
+];
+
 export default function ErrorLogsPage() {
   const queryClient = useQueryClient();
 
   const [errorAction, setErrorAction] = useState<ErrorActionState>(null);
   const [note, setNote] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("");
+  const [resolvedFilter, setResolvedFilter] = useState("");
 
   const query = useQuery({
     queryFn: async () => {
+      const queryParams: Record<string, string> = {
+        limit: "30",
+        page: "1",
+        sortBy: "createdAt",
+        sortDir: "desc",
+      };
+
+      if (severityFilter) queryParams.severity = severityFilter;
+      if (resolvedFilter !== "") queryParams.resolved = resolvedFilter;
+
       const response = await eden.api.v1["error-logs"].get({
-        query: { limit: "30", page: "1", sortBy: "createdAt", sortDir: "desc" },
+        query: queryParams,
       });
 
       if (response.error) throw response.error;
 
       return response.data as ErrorLogsResponse;
     },
-    queryKey: ["error-logs"],
+    queryKey: ["error-logs", severityFilter, resolvedFilter],
   });
 
   const resolveMutation = useMutation({
@@ -122,6 +148,24 @@ export default function ErrorLogsPage() {
       <DataTableShell
         description="Error log menyimpan pesan aman dan detail diagnostik tetap dibatasi untuk role operasional."
         title="Error Log"
+        toolbar={
+          <>
+            <SelectInput
+              id="error-logs-severity"
+              label="Severity"
+              onValueChange={(v) => setSeverityFilter(v)}
+              options={SEVERITY_OPTIONS}
+              value={severityFilter}
+            />
+            <SelectInput
+              id="error-logs-status"
+              label="Status"
+              onValueChange={(v) => setResolvedFilter(v)}
+              options={STATUS_OPTIONS}
+              value={resolvedFilter}
+            />
+          </>
+        }
       >
         {query.isError ? (
           <ErrorState

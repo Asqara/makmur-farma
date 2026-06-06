@@ -31,6 +31,7 @@ import {
   type MedicineStatus,
 } from "@/constants/domain";
 import { ROUTES } from "@/constants/routes";
+import { useDebounce } from "@/hooks/useDebounce";
 import { eden } from "@/lib/eden";
 import { formatRp } from "@/utils/formatRp";
 import { formatStockQuantity } from "@/utils/inventoryDisplay";
@@ -75,6 +76,7 @@ function stockLabel(totalAvailable: number, low: number, critical: number) {
  */
 export default function MedicinesPage() {
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search.trim(), 300);
   const [deactivateTarget, setDeactivateTarget] = useState<MedicineListItem | null>(null);
   const queryClient = useQueryClient();
 
@@ -84,7 +86,7 @@ export default function MedicinesPage() {
         query: {
           limit: "20",
           page: "1",
-          search,
+          search: debouncedSearch,
           sortBy: "name",
           sortDir: "asc",
         },
@@ -94,7 +96,7 @@ export default function MedicinesPage() {
 
       return response.data as MedicineListResponse;
     },
-    queryKey: ["medicines", search],
+    queryKey: ["medicines", debouncedSearch],
   });
 
   const deactivateMutation = useMutation({

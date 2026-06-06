@@ -44,7 +44,7 @@ export const ROUTES = {
   },
   STOCK_MOVEMENTS: "/stock-movements",
   STOCK_ADJUSTMENTS: "/stock-adjustments",
-  EXPIRY: "/expiry",
+  EXPIRY: "/batches/expiry",
 
   // Customer
   ACCOUNT: "/account",

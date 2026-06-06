@@ -16,7 +16,6 @@ import {
   PanelLeftOpen,
   Pill,
   Receipt,
-  Settings,
   ShieldCheck,
   ShoppingCart,
   Tag,
@@ -39,7 +38,10 @@ import {
   PermissionState,
   type AppShellNavGroup,
 } from "@/components/ui";
-import { NAVIGATION_SECTION_LABELS } from "@/constants/design";
+import {
+  NAVIGATION_SECTION_LABELS,
+  OVERLAY_Z_INDEX_CLASS_NAMES,
+} from "@/constants/design";
 import { OPERATIONAL_ROLE_VALUES, USER_ROLE_LABELS } from "@/constants/auth";
 import { ROUTES } from "@/constants/routes";
 import { isUnauthorizedError, useAuth } from "@/hooks/useAuth";
@@ -82,7 +84,7 @@ function getTitle(pathname: string) {
   if (pathname === ROUTES.BATCHES.INDEX) return "Batch dan Stok";
   if (pathname === ROUTES.STOCK_MOVEMENTS) return "Pergerakan Stok";
   if (pathname === ROUTES.STOCK_ADJUSTMENTS) return "Penyesuaian Stok";
-  if (pathname === ROUTES.EXPIRY) return "Kedaluwarsa";
+  if (pathname === ROUTES.EXPIRY || pathname.startsWith("/batches/expiry")) return "Monitor Kedaluwarsa";
   if (pathname === ROUTES.CUSTOMERS) return "Pelanggan";
   if (pathname.startsWith(ROUTES.REPORTS.INDEX)) return "Laporan";
   if (pathname === ROUTES.NOTIFICATIONS) return "Notifikasi";
@@ -266,7 +268,12 @@ function NotificationOverview({ enabled }: { enabled: boolean }) {
       </Button>
 
       {open ? (
-        <section className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border-default bg-elevated-surface p-3 shadow-floating">
+        <section
+          className={mc(
+            "absolute right-0 top-full mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-border-default bg-elevated-surface p-3 shadow-floating",
+            OVERLAY_Z_INDEX_CLASS_NAMES.popover,
+          )}
+        >
           <header className="mb-2 flex items-center justify-between gap-3">
             <section className="grid gap-0.5">
               <p className="ts-sm font-semibold text-text-strong">Notifikasi</p>
@@ -487,15 +494,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         href: ROUTES.USERS,
         icon: <UserCog />,
         label: "Pengguna",
-      });
-    }
-
-    if (hasPermission(user.role, "settings.read")) {
-      systemItems.push({
-        active: pathname === ROUTES.SETTINGS,
-        href: ROUTES.SETTINGS,
-        icon: <Settings />,
-        label: "Pengaturan",
       });
     }
 

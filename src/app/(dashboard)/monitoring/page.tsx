@@ -1,9 +1,11 @@
 "use client";
 
+import type React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Database, Server, Wifi } from "lucide-react";
+import { Activity, Database, RefreshCw, Wifi } from "lucide-react";
 
 import {
+  Button,
   Card,
   CardContent,
   DataTable,
@@ -41,12 +43,11 @@ type MonitoringResponse = {
   }>;
 };
 
-const SERVICE_ICONS = {
-  API: <Server />,
+const SERVICE_ICONS: Record<string, React.ReactElement> = {
   PostgreSQL: <Database />,
   Redis: <Wifi />,
   Worker: <Activity />,
-} as const;
+};
 
 export default function MonitoringPage() {
   const query = useQuery({
@@ -65,6 +66,17 @@ export default function MonitoringPage() {
     <DataTableShell
       description="Monitoring hanya menampilkan data yang tersedia dari runtime dan PostgreSQL."
       title="Monitoring"
+      toolbar={
+        <Button
+          disabled={query.isFetching}
+          leftIcon={<RefreshCw className={query.isFetching ? "animate-spin" : undefined} />}
+          onClick={() => query.refetch()}
+          size="sm"
+          variant="secondary"
+        >
+          Refresh
+        </Button>
+      }
     >
       {query.isError ? (
         <ErrorState
@@ -74,15 +86,11 @@ export default function MonitoringPage() {
         />
       ) : query.data ? (
         <section className="grid gap-6">
-          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {query.data.services.map((service) => (
               <MonitoringHealthCard
                 description={service.description}
-                icon={
-                  SERVICE_ICONS[
-                    service.serviceName as keyof typeof SERVICE_ICONS
-                  ]
-                }
+                icon={SERVICE_ICONS[service.serviceName]}
                 key={service.serviceName}
                 lastChecked={service.lastChecked}
                 metric={service.metric}

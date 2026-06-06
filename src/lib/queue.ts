@@ -1,10 +1,7 @@
-import "server-only";
-
 import { Queue, Worker, type JobsOptions, type Processor } from "bullmq";
 import IORedis from "ioredis";
 
 import { ENV } from "@/constants/config";
-import { ConfigurationError } from "@/lib/errors";
 
 export const QUEUE_NAMES = {
   imports: "imports",
@@ -14,6 +11,18 @@ export const QUEUE_NAMES = {
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
+
+export type QueueJobEnvelope<TPayload extends Record<string, unknown>> = {
+  actorUserId: string | null;
+  correlationId: string;
+  entityId: string;
+  entityType: string;
+  idempotencyKey: string;
+  jobId: string;
+  jobType: string;
+  payload: TPayload;
+  requestedAt: string;
+};
 
 const DEFAULT_JOB_OPTIONS: JobsOptions = {
   attempts: 3,
@@ -32,7 +41,7 @@ let connection: IORedis | null = null;
 
 function getConnection() {
   if (!ENV.redisUrl) {
-    throw new ConfigurationError("REDIS_URL wajib diisi untuk menjalankan worker.");
+    throw new QueueConfigurationError("REDIS_URL wajib diisi untuk menjalankan worker.");
   }
 
   connection ??= new IORedis(ENV.redisUrl, {
@@ -40,6 +49,13 @@ function getConnection() {
   });
 
   return connection;
+}
+
+class QueueConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QueueConfigurationError";
+  }
 }
 
 /**

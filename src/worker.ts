@@ -2,14 +2,30 @@ import { eq } from "drizzle-orm";
 
 import { jobRuns } from "@/drizzle-schema";
 import { db } from "@/lib/db";
-import { QUEUE_NAMES, createQueueWorker } from "@/lib/queue";
+import {
+  QUEUE_NAMES,
+  createQueueWorker,
+  type QueueJobEnvelope,
+} from "@/lib/queue";
 
-type WorkerPayload = {
-  jobRunId?: string;
-};
+type WorkerPayload = QueueJobEnvelope<Record<string, unknown>>;
 
-async function markJobFailed(jobRunId: string | undefined, safeError: string) {
-  if (!jobRunId) return;
+async function markJobProcessing(jobId: string | undefined) {
+  if (!jobId) return;
+
+  await db
+    .update(jobRuns)
+    .set({
+      lockedAt: new Date(),
+      startedAt: new Date(),
+      status: "PROCESSING",
+      updatedAt: new Date(),
+    })
+    .where(eq(jobRuns.id, jobId));
+}
+
+async function markJobFailed(jobId: string | undefined, safeError: string) {
+  if (!jobId) return;
 
   await db
     .update(jobRuns)
@@ -19,12 +35,13 @@ async function markJobFailed(jobRunId: string | undefined, safeError: string) {
       status: "FAILED",
       updatedAt: new Date(),
     })
-    .where(eq(jobRuns.id, jobRunId));
+    .where(eq(jobRuns.id, jobId));
 }
 
 async function unsupportedHandler(payload: WorkerPayload, queueName: string) {
+  await markJobProcessing(payload.jobId);
   await markJobFailed(
-    payload.jobRunId,
+    payload.jobId,
     `Handler worker ${queueName} belum dikonfigurasi untuk efek bisnis final.`,
   );
 }

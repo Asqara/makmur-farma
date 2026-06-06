@@ -164,7 +164,7 @@ export function useLogoutMutation() {
       }
     },
     onSettled: () => {
-      queryClient.removeQueries({ queryKey: AUTH_QUERY_KEY });
+      queryClient.clear();
     },
   });
 }

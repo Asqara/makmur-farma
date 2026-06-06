@@ -1,9 +1,13 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
-import { NAVIGATION_COPY } from "@/constants/design";
+import {
+  NAVIGATION_COPY,
+  OVERLAY_Z_INDEX_CLASS_NAMES,
+} from "@/constants/design";
 import { mc } from "@/utils/mc";
 
 import { BrandLogo } from "./brand-logo";
+import Link from "next/link";
 
 /**
  * Single app shell navigation item.
@@ -101,7 +105,7 @@ function NavItem({
   );
 
   return (
-    <a
+    <Link
       aria-current={item.active ? "page" : undefined}
       className={baseClass}
       href={item.href}
@@ -109,7 +113,7 @@ function NavItem({
       title={collapsed ? item.label : undefined}
     >
       {inner}
-    </a>
+    </Link>
   );
 }
 
@@ -258,7 +262,7 @@ export function AppShell({
     mobileSidebarNode = (
       <section
         aria-label="Menu mobile"
-        className="fixed inset-0 z-50 lg:hidden"
+        className={mc("fixed inset-0 lg:hidden", OVERLAY_Z_INDEX_CLASS_NAMES.mobileDrawer)}
       >
         {/* Overlay */}
         <button

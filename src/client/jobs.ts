@@ -1,6 +1,7 @@
 import "server-only";
 
-import { asc, desc, eq, sql } from "drizzle-orm";
+import IORedis from "ioredis";
+import { asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
 import type { JobStatus, JobType } from "@/constants/domain";
@@ -14,6 +15,7 @@ import { db, readDb } from "@/lib/db";
 import { NotFoundAppError } from "@/lib/errors";
 import type { RequestContext } from "@/lib/request";
 import type { ErrorLogRecordInput, ErrorLogResolutionInput } from "@/zod-schemas";
+import { ENV } from "@/constants/config";
 
 import {
   buildPagination,
@@ -21,6 +23,7 @@ import {
   combineConditions,
   countSql,
   getListFilters,
+  toBooleanString,
   toString,
   type ListResponse,
 } from "./list-utils";
@@ -49,6 +52,14 @@ export type JobListItem = {
   status: JobStatus;
 };
 
+export type ServiceHealth = {
+  description: string;
+  lastChecked: string;
+  metric: string;
+  serviceName: string;
+  status: "degraded" | "down" | "healthy" | "unknown";
+};
+
 export type MonitoringOverview = {
   errors: {
     critical: number;
@@ -62,13 +73,7 @@ export type MonitoringOverview = {
     queueName: string;
     waiting: number;
   }>;
-  services: Array<{
-    description: string;
-    lastChecked: string;
-    metric: string;
-    serviceName: string;
-    status: "degraded" | "down" | "healthy" | "unknown";
-  }>;
+  services: ServiceHealth[];
 };
 
 export type ApplicationErrorListItem = {
@@ -154,29 +159,111 @@ export class JobsClient {
   }
 
   async getMonitoringOverview(): Promise<MonitoringOverview> {
-    const [queueRows, errorRows] = await Promise.all([
-      readDb
-        .select({
-          active: countFiltered("PROCESSING"),
-          completed: countFiltered("COMPLETED"),
-          failed: countFiltered("FAILED"),
-          queueName: jobRuns.queueName,
-          waiting: countFiltered("QUEUED"),
-        })
-        .from(jobRuns)
-        .groupBy(jobRuns.queueName),
-      readDb
-        .select({
-          critical: countErrorSeverity("critical"),
-          info: countErrorSeverity("info"),
-          warning: countErrorSeverity("warning"),
-        })
-        .from(applicationErrors),
-    ]);
+    const checkedAt = new Date().toISOString();
 
-    const failedJobs = queueRows.reduce((sum, row) => sum + Number(row.failed), 0);
+    // ── PostgreSQL health check ──────────────────────────────────────────────
+    let postgresStatus: ServiceHealth["status"] = "healthy";
+    let postgresLatencyMs = 0;
+    let postgresMetric = "Query berhasil";
+
+    const pgStart = Date.now();
+    try {
+      await readDb.execute(sql`SELECT 1`);
+      postgresLatencyMs = Date.now() - pgStart;
+      postgresMetric = `${postgresLatencyMs} ms`;
+    } catch {
+      postgresStatus = "degraded";
+      postgresMetric = "Koneksi gagal";
+    }
+
+    // ── Redis health check ───────────────────────────────────────────────────
+    let redisStatus: ServiceHealth["status"] = "unknown";
+    let redisMetric = "Tidak dikonfigurasi";
+
+    if (ENV.redisUrl) {
+      const redisClient = new IORedis(ENV.redisUrl, {
+        connectTimeout: 2000,
+        lazyConnect: true,
+        maxRetriesPerRequest: 0,
+      });
+
+      const redisStart = Date.now();
+      try {
+        await redisClient.connect();
+        await redisClient.ping();
+        const latency = Date.now() - redisStart;
+        redisStatus = "healthy";
+        redisMetric = `${latency} ms`;
+      } catch {
+        redisStatus = "degraded";
+        redisMetric = "Koneksi gagal";
+      } finally {
+        redisClient.disconnect();
+      }
+    }
+
+    // ── Worker / queue health check ──────────────────────────────────────────
+    let workerStatus: ServiceHealth["status"] = "healthy";
+    let workerMetric = "Tidak ada job stalled";
+
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    let stalledCount = 0;
+    let queueRows: Array<{
+      active: number;
+      completed: number;
+      failed: number;
+      queueName: string;
+      waiting: number;
+    }> = [];
+    let errorRows: Array<{ critical: number; info: number; warning: number }> = [];
+
+    try {
+      const [stalledResult, queuesResult, errorsResult] = await Promise.all([
+        readDb
+          .select({ count: countSql() })
+          .from(jobRuns)
+          .where(
+            sql`${jobRuns.status} = 'PROCESSING' AND ${jobRuns.lockedAt} < ${tenMinutesAgo}`,
+          ),
+        readDb
+          .select({
+            active: countFiltered("PROCESSING"),
+            completed: countFiltered("COMPLETED"),
+            failed: countFiltered("FAILED"),
+            queueName: jobRuns.queueName,
+            waiting: countFiltered("QUEUED"),
+          })
+          .from(jobRuns)
+          .groupBy(jobRuns.queueName),
+        readDb
+          .select({
+            critical: countErrorSeverity("critical"),
+            info: countErrorSeverity("info"),
+            warning: countErrorSeverity("warning"),
+          })
+          .from(applicationErrors),
+      ]);
+
+      stalledCount = Number(stalledResult[0]?.count ?? 0);
+      queueRows = queuesResult.map((row) => ({
+        active: Number(row.active ?? 0),
+        completed: Number(row.completed ?? 0),
+        failed: Number(row.failed ?? 0),
+        queueName: row.queueName,
+        waiting: Number(row.waiting ?? 0),
+      }));
+      errorRows = errorsResult;
+
+      if (stalledCount > 0) {
+        workerStatus = "degraded";
+        workerMetric = `${stalledCount} job stalled`;
+      }
+    } catch {
+      workerStatus = "degraded";
+      workerMetric = "Gagal memeriksa worker";
+    }
+
     const criticalErrors = Number(errorRows[0]?.critical ?? 0);
-    const hasProblems = failedJobs > 0 || criticalErrors > 0;
 
     return {
       errors: {
@@ -184,41 +271,28 @@ export class JobsClient {
         info: Number(errorRows[0]?.info ?? 0),
         warning: Number(errorRows[0]?.warning ?? 0),
       },
-      queues: queueRows.map((row) => ({
-        active: Number(row.active ?? 0),
-        completed: Number(row.completed ?? 0),
-        failed: Number(row.failed ?? 0),
-        queueName: row.queueName,
-        waiting: Number(row.waiting ?? 0),
-      })),
+      queues: queueRows,
       services: [
         {
-          description: "API Elysia merespons request internal.",
-          lastChecked: new Date().toISOString(),
-          metric: "HTTP aktif",
-          serviceName: "API",
-          status: "healthy",
-        },
-        {
           description: "PostgreSQL menjadi sumber data operasional.",
-          lastChecked: new Date().toISOString(),
-          metric: "Query berhasil",
+          lastChecked: checkedAt,
+          metric: postgresMetric,
           serviceName: "PostgreSQL",
-          status: "healthy",
+          status: postgresStatus,
         },
         {
-          description: "Status Redis membutuhkan worker runtime aktif.",
-          lastChecked: new Date().toISOString(),
-          metric: "Belum diperiksa",
+          description: "Redis digunakan untuk antrian background job.",
+          lastChecked: checkedAt,
+          metric: redisMetric,
           serviceName: "Redis",
-          status: "unknown",
+          status: redisStatus,
         },
         {
-          description: "Dilihat dari job run yang tersimpan di PostgreSQL.",
-          lastChecked: new Date().toISOString(),
-          metric: `${failedJobs} job gagal`,
+          description: "Dilihat dari job PROCESSING yang terkunci >10 menit.",
+          lastChecked: checkedAt,
+          metric: workerMetric,
           serviceName: "Worker",
-          status: hasProblems ? "degraded" : "healthy",
+          status: workerStatus,
         },
       ],
     };
@@ -233,6 +307,7 @@ export class JobsClient {
       | ApplicationErrorListItem["severity"]
       | undefined;
     const source = toString(filters.where.source);
+    const resolved = toBooleanString(filters.where.resolved);
     const searchCondition = buildTextSearch(filters.search, [
       applicationErrors.safeMessage,
       applicationErrors.source,
@@ -241,6 +316,8 @@ export class JobsClient {
 
     if (severity) conditions.push(eq(applicationErrors.severity, severity));
     if (source) conditions.push(eq(applicationErrors.source, source));
+    if (resolved === true) conditions.push(isNotNull(applicationErrors.resolvedAt));
+    if (resolved === false) conditions.push(isNull(applicationErrors.resolvedAt));
     if (searchCondition) conditions.push(searchCondition);
 
     const whereClause = combineConditions(conditions);
@@ -287,51 +364,56 @@ export class JobsClient {
   }
 
   async recordError(input: ErrorLogRecordInput, actor: ErrorMutationActor) {
-    return db.transaction(async (tx) => {
-      const [error] = await tx
-        .insert(applicationErrors)
-        .values({
-          correlationId: input.correlationId ?? actor.requestContext.correlationId,
-          diagnosticDetail: input.diagnosticDetail ?? null,
-          safeMessage: input.safeMessage,
-          severity: input.severity,
-          source: input.source,
-          userId: actor.actorUserId,
-        })
-        .returning();
+    try {
+      return await db.transaction(async (tx) => {
+        const [error] = await tx
+          .insert(applicationErrors)
+          .values({
+            correlationId: input.correlationId ?? actor.requestContext.correlationId,
+            diagnosticDetail: input.diagnosticDetail ?? null,
+            safeMessage: input.safeMessage,
+            severity: input.severity,
+            source: input.source,
+            userId: actor.actorUserId,
+          })
+          .returning();
 
-      if (input.severity !== "info") {
-        await tx.insert(notifications).values({
-          actionHref: "/error-logs",
-          dedupeKey: `application-error:${error.id}:admin`,
-          message: input.safeMessage,
-          roleTarget: "ADMIN",
-          severity: input.severity,
-          title: "Application Error",
-          type: "APPLICATION_ERROR",
+        if (input.severity !== "info") {
+          await tx.insert(notifications).values({
+            actionHref: "/error-logs",
+            dedupeKey: `application-error:${error.id}:admin`,
+            message: input.safeMessage,
+            roleTarget: "ADMIN",
+            severity: input.severity,
+            title: "Application Error",
+            type: "APPLICATION_ERROR",
+          });
+        }
+
+        await tx.insert(auditLogs).values({
+          action: AUDIT_ACTIONS.APPLICATION_ERROR_RECORDED,
+          actorRole: actor.actorRole,
+          actorUserId: actor.actorUserId,
+          correlationId: actor.requestContext.correlationId,
+          description: "Application error dicatat dengan pesan aman.",
+          ipAddress: actor.requestContext.ipAddress,
+          metadata: {
+            errorId: error.id,
+            severity: input.severity,
+            source: input.source,
+          },
+          result: "SUCCESS",
+          targetId: error.id,
+          targetType: "application_error",
+          userAgent: actor.requestContext.userAgent,
         });
-      }
 
-      await tx.insert(auditLogs).values({
-        action: AUDIT_ACTIONS.APPLICATION_ERROR_RECORDED,
-        actorRole: actor.actorRole,
-        actorUserId: actor.actorUserId,
-        correlationId: actor.requestContext.correlationId,
-        description: "Application error dicatat dengan pesan aman.",
-        ipAddress: actor.requestContext.ipAddress,
-        metadata: {
-          errorId: error.id,
-          severity: input.severity,
-          source: input.source,
-        },
-        result: "SUCCESS",
-        targetId: error.id,
-        targetType: "application_error",
-        userAgent: actor.requestContext.userAgent,
+        return error;
       });
-
-      return error;
-    });
+    } catch (err) {
+      console.error("[recordError] Gagal menyimpan application error ke database:", err);
+      return null;
+    }
   }
 
   async resolveError(

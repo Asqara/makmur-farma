@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   AlertTriangle,
+  Bug,
   ClipboardCheck,
+  ExternalLink,
   PackageSearch,
   ReceiptText,
   ShoppingCart,
@@ -22,6 +24,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import {
@@ -47,6 +50,7 @@ import {
   ORDER_STATUS_LABELS,
   type OrderStatus,
 } from "@/constants/domain";
+import { useAuth } from "@/hooks/useAuth";
 import { eden } from "@/lib/eden";
 import { formatRp } from "@/utils/formatRp";
 import { formatDateTime } from "@/utils/inventoryDisplay";
@@ -98,10 +102,14 @@ type DashboardOverview = {
 };
 
 const METRIC_ICONS = {
+  "counter-orders": <ReceiptText />,
   "critical-stock": <AlertTriangle />,
   "failed-jobs": <Activity />,
   "failed-payments": <AlertTriangle />,
   "low-stock": <PackageSearch />,
+  "online-orders": <ShoppingCart />,
+  "open-critical-errors": <Bug />,
+  "out-stock": <AlertTriangle />,
   orders: <ShoppingCart />,
   prescriptions: <ClipboardCheck />,
   processing: <ReceiptText />,
@@ -119,11 +127,99 @@ function getDefaultRange() {
   };
 }
 
+type RoleActionPanelProps = {
+  count: number;
+  description: string;
+  href: string;
+  label: string;
+  title: string;
+  tone: "danger" | "info" | "neutral" | "primary" | "success" | "warning";
+};
+
+const TONE_CLASSES: Record<RoleActionPanelProps["tone"], string> = {
+  danger: "border-red-200 bg-red-50 text-red-800",
+  info: "border-blue-200 bg-blue-50 text-blue-800",
+  neutral: "border-zinc-200 bg-zinc-50 text-zinc-800",
+  primary: "border-indigo-200 bg-indigo-50 text-indigo-800",
+  success: "border-green-200 bg-green-50 text-green-800",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+};
+
+function RoleActionPanel({
+  count,
+  description,
+  href,
+  label,
+  title,
+  tone,
+}: RoleActionPanelProps) {
+  return (
+    <Card className={`border p-5 ${TONE_CLASSES[tone]}`}>
+      <section className="flex items-center justify-between gap-4">
+        <section className="grid gap-1">
+          <p className="ts-sm font-medium">{title}</p>
+          <strong className="ts-3xl">{count}</strong>
+          <p className="ts-xs">{description}</p>
+        </section>
+        <Link
+          className="inline-flex items-center gap-1 rounded-md border border-current px-3 py-1.5 ts-sm font-medium hover:opacity-80 transition-opacity"
+          href={href}
+        >
+          {label}
+          <ExternalLink aria-hidden="true" className="size-3.5" />
+        </Link>
+      </section>
+    </Card>
+  );
+}
+
+type StockActionPanelProps = {
+  criticalCount: number;
+  outCount: number;
+};
+
+function StockActionPanel({ criticalCount, outCount }: StockActionPanelProps) {
+  if (criticalCount === 0 && outCount === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="border border-red-200 bg-red-50 p-5">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <section className="grid gap-1">
+          <p className="ts-sm font-semibold text-red-800">Peringatan Stok</p>
+          <p className="ts-sm text-red-700">
+            {outCount > 0 && (
+              <span>
+                <strong>{outCount}</strong> obat stok habis.{" "}
+              </span>
+            )}
+            {criticalCount > 0 && (
+              <span>
+                <strong>{criticalCount}</strong> obat stok kritis.
+              </span>
+            )}
+          </p>
+        </section>
+        <Link
+          className="inline-flex w-fit items-center gap-1 rounded-md border border-red-400 px-3 py-1.5 ts-sm font-medium text-red-800 hover:opacity-80 transition-opacity"
+          href="/batches"
+        >
+          Kelola Batch
+          <ExternalLink aria-hidden="true" className="size-3.5" />
+        </Link>
+      </section>
+    </Card>
+  );
+}
+
 /**
  * Operational dashboard backed by authoritative database aggregates.
  */
 export default function DashboardPage() {
   const [dateRange, setDateRange] = useState(getDefaultRange);
+  const authQuery = useAuth();
+  const userRole = authQuery.data?.user?.role ?? null;
 
   const dashboardQuery = useQuery({
     queryFn: async () => {
@@ -141,19 +237,46 @@ export default function DashboardPage() {
   const metricNodes = useMemo(() => {
     const metrics = dashboardQuery.data?.metrics ?? [];
 
-    return metrics.map((metric) => (
-      <DashboardMetricCard
-        icon={METRIC_ICONS[metric.key as keyof typeof METRIC_ICONS]}
-        key={metric.key}
-        title={metric.title}
-        tone={metric.tone}
-        value={
-          metric.key === "revenue"
-            ? formatRp(Number(metric.value))
-            : metric.value
-        }
-      />
-    ));
+    const METRIC_LINKS: Record<string, string> = {
+      "counter-orders": "/orders",
+      "critical-stock": "/batches",
+      "failed-jobs": "/jobs",
+      "failed-payments": "/payments",
+      "low-stock": "/batches",
+      "online-orders": "/orders",
+      "open-critical-errors": "/error-logs",
+      "out-stock": "/batches",
+      orders: "/orders",
+      prescriptions: "/prescriptions",
+      processing: "/orders",
+    };
+
+    return metrics.map((metric) => {
+      const href = METRIC_LINKS[metric.key];
+      const card = (
+        <DashboardMetricCard
+          icon={METRIC_ICONS[metric.key as keyof typeof METRIC_ICONS]}
+          key={metric.key}
+          title={metric.title}
+          tone={metric.tone}
+          value={
+            metric.key === "revenue"
+              ? formatRp(Number(metric.value))
+              : metric.value
+          }
+        />
+      );
+
+      if (href) {
+        return (
+          <Link className="group" href={href} key={metric.key}>
+            {card}
+          </Link>
+        );
+      }
+
+      return card;
+    });
   }, [dashboardQuery.data]);
 
   if (dashboardQuery.isLoading) {
@@ -203,6 +326,44 @@ export default function DashboardPage() {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {metricNodes}
       </section>
+
+      {userRole === "PHARMACIST" && (
+        <RoleActionPanel
+          count={Number(
+            overview.metrics.find((m) => m.key === "prescriptions")?.value ?? 0,
+          )}
+          description="Resep yang menunggu tinjauan farmasis."
+          href="/prescriptions"
+          label="Tinjau Resep"
+          title="Antrian Resep"
+          tone="warning"
+        />
+      )}
+
+      {userRole === "CASHIER" && (
+        <RoleActionPanel
+          count={Number(
+            overview.metrics.find((m) => m.key === "counter-orders")?.value ?? 0,
+          )}
+          description="Transaksi kasir pada periode ini."
+          href="/orders"
+          label="Lihat Transaksi"
+          title="Transaksi Kasir"
+          tone="info"
+        />
+      )}
+
+      {(userRole === "ADMIN" ||
+        userRole === "PHARMACIST") && (
+        <StockActionPanel
+          criticalCount={Number(
+            overview.metrics.find((m) => m.key === "critical-stock")?.value ?? 0,
+          )}
+          outCount={Number(
+            overview.metrics.find((m) => m.key === "out-stock")?.value ?? 0,
+          )}
+        />
+      )}
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.8fr)]">
         <Card>

@@ -3,8 +3,13 @@ import "server-only";
 import { desc, eq } from "drizzle-orm";
 
 import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
-import { auditLogs, reportRuns } from "@/drizzle-schema";
+import { auditLogs, jobRuns, reportRuns } from "@/drizzle-schema";
 import { db, readDb } from "@/lib/db";
+import {
+  QUEUE_NAMES,
+  createQueue,
+  type QueueJobEnvelope,
+} from "@/lib/queue";
 import type { RequestContext } from "@/lib/request";
 
 import {
@@ -86,33 +91,70 @@ export class ReportsClient {
   }
 
   async requestReport(input: RequestReportInput) {
-    const [report] = await db
-      .insert(reportRuns)
-      .values({
-        filters: input.filters,
-        progress: 0,
-        requesterUserId: input.requesterUserId,
-        status: "QUEUED",
-        type: input.type,
-      })
-      .returning();
+    const { jobRun, report } = await db.transaction(async (tx) => {
+      const [createdReport] = await tx
+        .insert(reportRuns)
+        .values({
+          filters: input.filters,
+          progress: 0,
+          requesterUserId: input.requesterUserId,
+          status: "QUEUED",
+          type: input.type,
+        })
+        .returning();
 
-    await db.insert(auditLogs).values({
-      action: AUDIT_ACTIONS.REPORT_GENERATED,
-      actorRole: input.actorRole,
+      const [createdJobRun] = await tx
+        .insert(jobRuns)
+        .values({
+          correlationId: input.requestContext.correlationId,
+          entityId: createdReport.id,
+          entityType: "report",
+          jobKey: `report:${createdReport.id}`,
+          jobType: "REPORT_GENERATION",
+          queueName: QUEUE_NAMES.reports,
+          status: "QUEUED",
+        })
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.REPORT_GENERATED,
+        actorRole: input.actorRole,
+        actorUserId: input.requesterUserId,
+        correlationId: input.requestContext.correlationId,
+        description: "Permintaan laporan dibuat dan masuk antrean background job.",
+        ipAddress: input.requestContext.ipAddress,
+        metadata: {
+          filters: input.filters,
+          jobRunId: createdJobRun.id,
+          reportId: createdReport.id,
+          type: input.type,
+        },
+        result: "SUCCESS",
+        targetId: createdReport.id,
+        targetType: "report",
+        userAgent: input.requestContext.userAgent,
+      });
+
+      return { jobRun: createdJobRun, report: createdReport };
+    });
+
+    const queue = createQueue(QUEUE_NAMES.reports);
+    const payload: QueueJobEnvelope<{ reportRunId: string }> = {
       actorUserId: input.requesterUserId,
       correlationId: input.requestContext.correlationId,
-      description: "Permintaan laporan dibuat dan masuk antrean background job.",
-      ipAddress: input.requestContext.ipAddress,
-      metadata: {
-        filters: input.filters,
-        reportId: report.id,
-        type: input.type,
+      entityId: report.id,
+      entityType: "report",
+      idempotencyKey: jobRun.jobKey,
+      jobId: jobRun.id,
+      jobType: "REPORT_GENERATION",
+      payload: {
+        reportRunId: report.id,
       },
-      result: "SUCCESS",
-      targetId: report.id,
-      targetType: "report",
-      userAgent: input.requestContext.userAgent,
+      requestedAt: report.createdAt.toISOString(),
+    };
+
+    await queue.add("REPORT_GENERATION", payload, {
+      jobId: jobRun.jobKey,
     });
 
     return report;

@@ -17,6 +17,8 @@ import {
   TextInput,
 } from "@/components/ui";
 import { ROUTES } from "@/constants/routes";
+import { useCart } from "@/hooks/useCart";
+import { useDebounce } from "@/hooks/useDebounce";
 import { eden } from "@/lib/eden";
 import { formatRp } from "@/utils/formatRp";
 import { formatStockQuantity } from "@/utils/inventoryDisplay";
@@ -55,40 +57,33 @@ function availabilityLabel(totalAvailable: number, lowStockThreshold: number) {
  */
 export default function CatalogPage() {
   const [search, setSearch] = useState("");
-  const queryClient = useQueryClient();
+  const debouncedSearch = useDebounce(search.trim(), 300);
+  const cart = useCart();
   const [addingId, setAddingId] = useState<string | null>(null);
 
-  const addToCartMutation = useMutation({
-    mutationFn: async (medicineId: string) => {
-      setAddingId(medicineId);
-      const response = await eden.api.v1.cart.items.post({
-        medicineId,
+  const handleAddToCart = async (medicine: any) => {
+    setAddingId(medicine.id);
+    try {
+      await cart.addItem({
+        medicineId: medicine.id,
         quantity: 1,
+        name: medicine.name,
+        price: Number(medicine.sellingPrice),
+        prescriptionRequired: medicine.prescriptionRequired,
+        unit: medicine.unit,
       });
-
-      if (response.error) {
-        const message =
-          (response.error as { publicMessage?: string }).publicMessage ??
-          "Gagal menambahkan ke keranjang.";
-        throw new Error(message);
-      }
-
-      return response.data;
-    },
-    onSettled: () => {
+    } finally {
       setAddingId(null);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cart"] });
-    },
-  });
+    }
+  };
+
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.catalog.medicines.get({
         query: {
           limit: "24",
           page: "1",
-          search,
+          search: debouncedSearch,
           sortBy: "name",
           sortDir: "asc",
         },
@@ -98,7 +93,7 @@ export default function CatalogPage() {
 
       return response.data as CatalogResponse;
     },
-    queryKey: ["catalog", search],
+    queryKey: ["catalog", debouncedSearch],
   });
 
   return (
@@ -203,7 +198,7 @@ export default function CatalogPage() {
                         medicine.totalAvailable <= 0 ||
                         addingId === medicine.id
                       }
-                      onClick={() => addToCartMutation.mutate(medicine.id)}
+                      onClick={() => handleAddToCart(medicine)}
                       type="button"
                     >
                       {addingId === medicine.id

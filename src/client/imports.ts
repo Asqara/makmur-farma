@@ -4,8 +4,13 @@ import { desc, eq } from "drizzle-orm";
 
 import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
 import type { ImportRowStatus } from "@/constants/domain";
-import { auditLogs, importRowResults, importRuns } from "@/drizzle-schema";
+import { auditLogs, importRowResults, importRuns, jobRuns } from "@/drizzle-schema";
 import { db, readDb } from "@/lib/db";
+import {
+  QUEUE_NAMES,
+  createQueue,
+  type QueueJobEnvelope,
+} from "@/lib/queue";
 import type { RequestContext } from "@/lib/request";
 
 import {
@@ -146,35 +151,72 @@ export class ImportsClient {
   }
 
   async requestImport(input: RequestImportInput) {
-    const [importRun] = await db
-      .insert(importRuns)
-      .values({
-        fileSizeBytes: input.fileSizeBytes,
-        mapping: input.mapping,
-        originalFileName: input.originalFileName,
-        requesterUserId: input.requesterUserId,
-        sourceFileObjectKey: input.sourceFileObjectKey,
-        status: "QUEUED",
-        type: input.type ?? "MEDICINE",
-      })
-      .returning();
+    const { importRun, jobRun } = await db.transaction(async (tx) => {
+      const [createdImportRun] = await tx
+        .insert(importRuns)
+        .values({
+          fileSizeBytes: input.fileSizeBytes,
+          mapping: input.mapping,
+          originalFileName: input.originalFileName,
+          requesterUserId: input.requesterUserId,
+          sourceFileObjectKey: input.sourceFileObjectKey,
+          status: "QUEUED",
+          type: input.type ?? "MEDICINE",
+        })
+        .returning();
 
-    await db.insert(auditLogs).values({
-      action: AUDIT_ACTIONS.IMPORT_RUN,
-      actorRole: input.actorRole,
+      const [createdJobRun] = await tx
+        .insert(jobRuns)
+        .values({
+          correlationId: input.requestContext.correlationId,
+          entityId: createdImportRun.id,
+          entityType: "import",
+          jobKey: `import:${createdImportRun.id}`,
+          jobType: "MEDICINE_IMPORT",
+          queueName: QUEUE_NAMES.imports,
+          status: "QUEUED",
+        })
+        .returning();
+
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.IMPORT_RUN,
+        actorRole: input.actorRole,
+        actorUserId: input.requesterUserId,
+        correlationId: input.requestContext.correlationId,
+        description: "Import obat dibuat dan masuk antrean background job.",
+        ipAddress: input.requestContext.ipAddress,
+        metadata: {
+          importRunId: createdImportRun.id,
+          jobRunId: createdJobRun.id,
+          originalFileName: input.originalFileName,
+          type: createdImportRun.type,
+        },
+        result: "SUCCESS",
+        targetId: createdImportRun.id,
+        targetType: "import",
+        userAgent: input.requestContext.userAgent,
+      });
+
+      return { importRun: createdImportRun, jobRun: createdJobRun };
+    });
+
+    const queue = createQueue(QUEUE_NAMES.imports);
+    const payload: QueueJobEnvelope<{ importRunId: string }> = {
       actorUserId: input.requesterUserId,
       correlationId: input.requestContext.correlationId,
-      description: "Import obat dibuat dan masuk antrean background job.",
-      ipAddress: input.requestContext.ipAddress,
-      metadata: {
+      entityId: importRun.id,
+      entityType: "import",
+      idempotencyKey: jobRun.jobKey,
+      jobId: jobRun.id,
+      jobType: "MEDICINE_IMPORT",
+      payload: {
         importRunId: importRun.id,
-        originalFileName: input.originalFileName,
-        type: importRun.type,
       },
-      result: "SUCCESS",
-      targetId: importRun.id,
-      targetType: "import",
-      userAgent: input.requestContext.userAgent,
+      requestedAt: importRun.createdAt.toISOString(),
+    };
+
+    await queue.add("MEDICINE_IMPORT", payload, {
+      jobId: jobRun.jobKey,
     });
 
     return importRun;

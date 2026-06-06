@@ -62,4 +62,15 @@ export const ENV = {
       SESSION_IDLE_TIMEOUT_SECONDS / 60,
     ) * 60,
   },
+  /**
+   * Enables API documentation UI and raw OpenAPI JSON.
+   * Defaults to enabled for local assessment/demo unless set to "false".
+   */
+  enableApiDocs: process.env.ENABLE_API_DOCS !== "false",
+  /**
+   * When true, the QRIS payment simulator endpoints are active.
+   * Set ENABLE_PAYMENT_SIMULATOR=true in development/demo environments only.
+   * Never enable in production.
+   */
+  enablePaymentSimulator: process.env.ENABLE_PAYMENT_SIMULATOR === "true",
 } as const;

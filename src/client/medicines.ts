@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, gte, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 
 import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
 import type {
@@ -21,6 +21,7 @@ import {
 import { db, readDb } from "@/lib/db";
 import {
   ConflictAppError,
+  InsufficientStockError,
   NotFoundAppError,
   ValidationAppError,
 } from "@/lib/errors";
@@ -30,6 +31,8 @@ import type {
   CategoryUpdateInput,
   MedicineCreateInput,
   MedicineUpdateInput,
+  StockAdjustmentInput,
+  StockReceiptInput,
   SupplierCreateInput,
   SupplierUpdateInput,
 } from "@/zod-schemas";
@@ -105,6 +108,7 @@ export type CategoryListItem = {
 };
 
 export type SupplierListItem = {
+  address: string | null;
   code: string;
   contactName: string | null;
   createdAt: Date;
@@ -141,6 +145,8 @@ export type StockMovementListItem = {
     id: string | null;
     name: string | null;
   };
+  availableAfter: number;
+  availableBefore: number;
   batchNumber: string;
   createdAt: Date;
   id: string;
@@ -161,6 +167,23 @@ type MutationActor = {
   actorUserId: string;
   requestContext: RequestContext;
 };
+
+function parseDateFilter(value: string, endOfDay = false) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date;
+}
 
 function normalizeCode(code: string) {
   return code.trim().toUpperCase();
@@ -301,6 +324,7 @@ export class MedicinesClient {
     }
 
     return {
+      address: supplier.address ?? null,
       code: supplier.code,
       contactName: supplier.contactName ?? null,
       createdAt: supplier.createdAt,
@@ -929,6 +953,7 @@ export class MedicinesClient {
 
     return {
       data: rows.map((row) => ({
+        address: row.address ?? null,
         code: row.code,
         contactName: row.contactName ?? null,
         createdAt: row.createdAt,
@@ -950,6 +975,7 @@ export class MedicinesClient {
     const status = toString(filters.where.status) as BatchStatus | undefined;
     const medicineId = toString(filters.where.medicineId);
     const expiryTo = toString(filters.where.expiryTo);
+    const expiryWindow = toString(filters.where.expiryWindow);
     const searchCondition = buildTextSearch(filters.search, [
       medicineBatches.batchNumber,
       medicines.name,
@@ -962,6 +988,24 @@ export class MedicinesClient {
     if (expiryTo) {
       conditions.push(lte(medicineBatches.expiryDate, new Date(expiryTo)));
     }
+
+    if (expiryWindow === "expired") {
+      // Batches that are already past their expiry date and still have stock
+      conditions.push(lt(medicineBatches.expiryDate, sql`current_date`));
+      conditions.push(gt(medicineBatches.availableQuantity, 0));
+    } else if (expiryWindow === "30" || expiryWindow === "60" || expiryWindow === "90") {
+      const windowDays = Number(expiryWindow);
+      // Batches expiring within N days from today (not yet expired)
+      conditions.push(gte(medicineBatches.expiryDate, sql`current_date`));
+      conditions.push(
+        lte(medicineBatches.expiryDate, sql`current_date + interval '${sql.raw(String(windowDays))} days'`),
+      );
+      conditions.push(gt(medicineBatches.availableQuantity, 0));
+      conditions.push(
+        notInArray(medicineBatches.status, ["BLOCKED", "RECALLED"]),
+      );
+    }
+
     if (searchCondition) conditions.push(searchCondition);
 
     const whereClause = combineConditions(conditions);
@@ -1053,8 +1097,11 @@ export class MedicinesClient {
     ]);
 
     if (type) conditions.push(eq(stockMovements.type, type));
-    if (dateFrom) conditions.push(gte(stockMovements.createdAt, new Date(dateFrom)));
-    if (dateTo) conditions.push(lte(stockMovements.createdAt, new Date(dateTo)));
+    const parsedDateFrom = dateFrom ? parseDateFilter(dateFrom) : null;
+    const parsedDateTo = dateTo ? parseDateFilter(dateTo, true) : null;
+
+    if (parsedDateFrom) conditions.push(gte(stockMovements.createdAt, parsedDateFrom));
+    if (parsedDateTo) conditions.push(lte(stockMovements.createdAt, parsedDateTo));
     if (searchCondition) conditions.push(searchCondition);
 
     const whereClause = combineConditions(conditions);
@@ -1084,6 +1131,8 @@ export class MedicinesClient {
       .select({
         actorId: users.id,
         actorName: users.fullName,
+        availableAfter: stockMovements.availableAfter,
+        availableBefore: stockMovements.availableBefore,
         batchNumber: medicineBatches.batchNumber,
         createdAt: stockMovements.createdAt,
         id: stockMovements.id,
@@ -1116,6 +1165,8 @@ export class MedicinesClient {
           id: row.actorId ?? null,
           name: row.actorName ?? null,
         },
+        availableAfter: row.availableAfter,
+        availableBefore: row.availableBefore,
         batchNumber: row.batchNumber,
         createdAt: row.createdAt,
         id: row.id,
@@ -1132,5 +1183,271 @@ export class MedicinesClient {
       })),
       pagination: buildPagination(total, filters.page, filters.limit),
     };
+  }
+
+  /**
+   * Returns a single batch with its medicine and supplier detail.
+   */
+  async getBatch(id: string): Promise<BatchListItem> {
+    const result = await this.listBatches({ id, limit: "1", page: "1" });
+    const batch = result.data.find((item) => item.id === id);
+
+    if (!batch) {
+      throw new NotFoundAppError("Batch tidak ditemukan.");
+    }
+
+    return batch;
+  }
+
+  /**
+   * Returns all batches for a medicine without pagination.
+   */
+  async getBatchesForMedicine(medicineId: string): Promise<BatchListItem[]> {
+    const result = await this.listBatches({ limit: "200", medicineId, page: "1" });
+
+    return result.data;
+  }
+
+  /**
+   * Records incoming stock as a new batch and creates the corresponding RECEIPT movement.
+   */
+  async createStockReceipt(
+    input: StockReceiptInput,
+    actor: MutationActor,
+  ): Promise<BatchListItem> {
+    const [medicine] = await readDb
+      .select({ id: medicines.id, status: medicines.status })
+      .from(medicines)
+      .where(eq(medicines.id, input.medicineId))
+      .limit(1);
+
+    if (!medicine) {
+      throw new NotFoundAppError("Obat tidak ditemukan.");
+    }
+
+    if (medicine.status !== "ACTIVE") {
+      throw new ValidationAppError("Obat harus berstatus Aktif untuk menerima stok.");
+    }
+
+    const receivedDate = new Date(input.receivedDate);
+    const expiryDate = new Date(input.expiryDate);
+
+    if (expiryDate <= receivedDate) {
+      throw new ValidationAppError(
+        "Tanggal kedaluwarsa harus lebih besar dari tanggal terima.",
+      );
+    }
+
+    const [duplicate] = await readDb
+      .select({ id: medicineBatches.id })
+      .from(medicineBatches)
+      .where(
+        and(
+          eq(medicineBatches.medicineId, input.medicineId),
+          eq(medicineBatches.batchNumber, input.batchNumber.trim()),
+        ),
+      )
+      .limit(1);
+
+    if (duplicate) {
+      throw new ConflictAppError(
+        "Nomor batch sudah digunakan untuk obat ini.",
+      );
+    }
+
+    const [batch] = await db.transaction(async (tx) => {
+      const [newBatch] = await tx
+        .insert(medicineBatches)
+        .values({
+          availableQuantity: input.quantity,
+          batchNumber: input.batchNumber.trim(),
+          expiryDate,
+          medicineId: input.medicineId,
+          purchaseCost: input.purchaseCost,
+          receivedDate,
+          reservedQuantity: 0,
+          status: "AVAILABLE",
+          supplierId: input.supplierId ?? null,
+        })
+        .returning();
+
+      await tx.insert(stockMovements).values({
+        actorUserId: actor.actorUserId,
+        availableAfter: input.quantity,
+        availableBefore: 0,
+        batchId: newBatch.id,
+        medicineId: input.medicineId,
+        quantityDelta: input.quantity,
+        reason: "Stok diterima",
+        referenceId: newBatch.id,
+        referenceType: "batch",
+        reservedAfter: 0,
+        reservedBefore: 0,
+        type: "RECEIPT",
+      });
+
+      return [newBatch];
+    });
+
+    await this.writeAudit({
+      ...actor,
+      action: AUDIT_ACTIONS.BATCH_CREATED,
+      description: "Batch stok diterima.",
+      metadata: {
+        batchNumber: batch.batchNumber,
+        medicineId: input.medicineId,
+        quantity: input.quantity,
+      },
+      targetId: batch.id,
+      targetType: "medicine_batch",
+    });
+
+    return this.getBatch(batch.id);
+  }
+
+  /**
+   * Applies a stock adjustment (in or out) to an existing batch.
+   */
+  async adjustStock(
+    input: StockAdjustmentInput,
+    actor: MutationActor,
+  ): Promise<BatchListItem> {
+    const [batch] = await readDb
+      .select({
+        availableQuantity: medicineBatches.availableQuantity,
+        id: medicineBatches.id,
+        medicineId: medicineBatches.medicineId,
+        reservedQuantity: medicineBatches.reservedQuantity,
+        status: medicineBatches.status,
+      })
+      .from(medicineBatches)
+      .where(eq(medicineBatches.id, input.batchId))
+      .limit(1);
+
+    if (!batch) {
+      throw new NotFoundAppError("Batch tidak ditemukan.");
+    }
+
+    if (batch.status === "RECALLED") {
+      throw new ValidationAppError("Batch yang ditarik tidak dapat disesuaikan.");
+    }
+
+    const isOut = input.adjustmentType === "ADJUSTMENT_OUT";
+    const newAvailable = isOut
+      ? batch.availableQuantity - input.quantity
+      : batch.availableQuantity + input.quantity;
+
+    if (newAvailable < 0) {
+      throw new InsufficientStockError(
+        `Penyesuaian keluar melebihi stok tersedia (${batch.availableQuantity}).`,
+      );
+    }
+
+    const nextStatus: BatchStatus =
+      newAvailable === 0 && batch.reservedQuantity === 0 ? "DEPLETED" : batch.status;
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(medicineBatches)
+        .set({
+          availableQuantity: newAvailable,
+          status: nextStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(medicineBatches.id, input.batchId));
+
+      await tx.insert(stockMovements).values({
+        actorUserId: actor.actorUserId,
+        availableAfter: newAvailable,
+        availableBefore: batch.availableQuantity,
+        batchId: input.batchId,
+        medicineId: batch.medicineId,
+        quantityDelta: isOut ? -input.quantity : input.quantity,
+        reason: input.reason,
+        referenceId: input.batchId,
+        referenceType: "batch_adjustment",
+        reservedAfter: batch.reservedQuantity,
+        reservedBefore: batch.reservedQuantity,
+        type: "ADJUSTMENT",
+      });
+    });
+
+    await this.writeAudit({
+      ...actor,
+      action: AUDIT_ACTIONS.STOCK_ADJUSTED,
+      description: `Stok batch disesuaikan (${input.adjustmentType}).`,
+      metadata: {
+        adjustmentType: input.adjustmentType,
+        batchId: input.batchId,
+        quantity: input.quantity,
+        reason: input.reason,
+      },
+      targetId: input.batchId,
+      targetType: "medicine_batch",
+    });
+
+    return this.getBatch(input.batchId);
+  }
+
+  /**
+   * Blocks a batch to prevent further allocation.
+   */
+  async blockBatch(
+    batchId: string,
+    reason: string,
+    actor: MutationActor,
+  ): Promise<BatchListItem> {
+    const [batch] = await readDb
+      .select({
+        availableQuantity: medicineBatches.availableQuantity,
+        id: medicineBatches.id,
+        medicineId: medicineBatches.medicineId,
+        reservedQuantity: medicineBatches.reservedQuantity,
+        status: medicineBatches.status,
+      })
+      .from(medicineBatches)
+      .where(eq(medicineBatches.id, batchId))
+      .limit(1);
+
+    if (!batch) {
+      throw new NotFoundAppError("Batch tidak ditemukan.");
+    }
+
+    if (batch.status === "BLOCKED") {
+      throw new ValidationAppError("Batch sudah dalam status Diblokir.");
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(medicineBatches)
+        .set({ status: "BLOCKED", updatedAt: new Date() })
+        .where(eq(medicineBatches.id, batchId));
+
+      await tx.insert(stockMovements).values({
+        actorUserId: actor.actorUserId,
+        availableAfter: batch.availableQuantity,
+        availableBefore: batch.availableQuantity,
+        batchId,
+        medicineId: batch.medicineId,
+        quantityDelta: 0,
+        reason,
+        referenceId: batchId,
+        referenceType: "batch_block",
+        reservedAfter: batch.reservedQuantity,
+        reservedBefore: batch.reservedQuantity,
+        type: "ADJUSTMENT",
+      });
+    });
+
+    await this.writeAudit({
+      ...actor,
+      action: AUDIT_ACTIONS.STOCK_ADJUSTED,
+      description: "Batch diblokir.",
+      metadata: { batchId, reason },
+      targetId: batchId,
+      targetType: "medicine_batch",
+    });
+
+    return this.getBatch(batchId);
   }
 }

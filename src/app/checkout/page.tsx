@@ -187,9 +187,15 @@ export default function CheckoutPage() {
           </Card>
 
           <section className="flex w-full flex-col gap-3">
-            <ButtonLink href={ROUTES.ACCOUNT} variant="primary">
-              Lihat Pesanan Saya
-            </ButtonLink>
+            {result.payment.method === "QRIS" && result.payment.status === "PENDING" ? (
+              <ButtonLink href={`/checkout/${result.payment.id}/qris`} variant="primary">
+                Bayar Sekarang (QRIS)
+              </ButtonLink>
+            ) : (
+              <ButtonLink href={ROUTES.ACCOUNT} variant="primary">
+                Lihat Pesanan Saya
+              </ButtonLink>
+            )}
             <ButtonLink href={ROUTES.CATALOG.INDEX} variant="secondary">
               Lanjutkan Belanja
             </ButtonLink>

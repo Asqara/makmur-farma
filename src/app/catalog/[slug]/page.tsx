@@ -19,6 +19,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { ROUTES } from "@/constants/routes";
+import { useCart } from "@/hooks/useCart";
 import { eden } from "@/lib/eden";
 import { formatRp } from "@/utils/formatRp";
 import { formatStockQuantity } from "@/utils/inventoryDisplay";
@@ -57,10 +58,11 @@ function availabilityLabel(totalAvailable: number, lowStockThreshold: number) {
 export default function CatalogDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const queryClient = useQueryClient();
+  const cart = useCart();
   const slug = typeof params.slug === "string" ? params.slug : "";
   const [quantity, setQuantity] = useState(1);
   const [addedMessage, setAddedMessage] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
 
   const query = useQuery({
     enabled: Boolean(slug),
@@ -74,37 +76,31 @@ export default function CatalogDetailPage() {
     queryKey: ["catalog-detail", slug],
   });
 
-  const addToCartMutation = useMutation({
-    mutationFn: async () => {
-      if (!query.data) throw new Error("Obat tidak tersedia.");
-
-      const response = await eden.api.v1.cart.items.post({
+  const handleAddToCart = async () => {
+    if (!query.data) return;
+    setIsAdding(true);
+    setAddedMessage(null);
+    try {
+      await cart.addItem({
         medicineId: query.data.id,
         quantity,
+        name: query.data.name,
+        price: Number(query.data.sellingPrice),
+        prescriptionRequired: query.data.prescriptionRequired,
+        unit: query.data.unit,
       });
-
-      if (response.error) {
-        const message =
-          (response.error as { publicMessage?: string }).publicMessage ??
-          "Gagal menambahkan ke keranjang.";
-        throw new Error(message);
-      }
-
-      return response.data;
-    },
-    onError: (error: Error) => {
-      setAddedMessage(error.message);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cart"] });
       setAddedMessage("Obat berhasil ditambahkan ke keranjang!");
       setTimeout(() => setAddedMessage(null), 3000);
-    },
-  });
+    } catch (error: any) {
+      setAddedMessage(error.message || "Gagal menambahkan ke keranjang.");
+    } finally {
+      setIsAdding(false);
+    }
+  };
 
   const medicine = query.data;
   const outOfStock = medicine ? medicine.totalAvailable <= 0 : false;
-  const cannotAdd = outOfStock || addToCartMutation.isPending;
+  const cannotAdd = outOfStock || isAdding;
 
   return (
     <main className="min-h-screen bg-page-background">
@@ -257,10 +253,10 @@ export default function CatalogDetailPage() {
                   className="flex-1"
                   disabled={cannotAdd}
                   leftIcon={<ShoppingCart aria-hidden="true" className="size-4" />}
-                  onClick={() => addToCartMutation.mutate()}
+                  onClick={handleAddToCart}
                   type="button"
                 >
-                  {addToCartMutation.isPending
+                  {isAdding
                     ? "Menambahkan..."
                     : outOfStock
                       ? "Stok Habis"

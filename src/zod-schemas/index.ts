@@ -263,6 +263,15 @@ export class Cart {
       .max(120, "Idempotency key maksimal 120 karakter."),
     paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "QRIS"]),
   });
+
+  static merge = z.object({
+    items: z.array(
+      z.object({
+        medicineId: UUID_SCHEMA,
+        quantity: POSITIVE_INT_SCHEMA,
+      }),
+    ),
+  });
 }
 
 /**
@@ -276,6 +285,17 @@ export class Orders {
       .trim()
       .max(500, "Catatan maksimal 500 karakter.")
       .optional(),
+  });
+
+  static cashierCheckout = z.object({
+    customerUserId: OPTIONAL_UUID_SCHEMA,
+    items: z.array(
+      z.object({
+        medicineId: UUID_SCHEMA,
+        quantity: POSITIVE_INT_SCHEMA,
+      }),
+    ),
+    paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "QRIS"]),
   });
 }
 
@@ -314,11 +334,34 @@ export class Prescriptions {
 }
 
 /**
- * Payment status filters and callback schemas.
+ * Payment status filters, callback schemas, and simulator input.
  */
 export class Payments {
   static status = z.enum(PAYMENT_STATUS_VALUES);
+
+  static simulateCallback = z.object({
+    outcome: z.enum(["PAID", "FAILED", "EXPIRED"]),
+  });
+
+  static initializeQris = z.object({
+    amount: z
+      .union([z.string(), z.number()])
+      .transform((v) => String(v).trim()),
+  });
+
+  static override = z.object({
+    overrideStatus: z.enum(["PAID", "CANCELLED", "REFUNDED"]),
+    reason: z
+      .string()
+      .trim()
+      .min(5, "Alasan minimal 5 karakter.")
+      .max(500, "Alasan maksimal 500 karakter."),
+  });
 }
+
+export type PaymentSimulateInput = z.infer<typeof Payments.simulateCallback>;
+export type PaymentInitializeQrisInput = z.infer<typeof Payments.initializeQris>;
+export type PaymentOverrideInput = z.infer<typeof Payments.override>;
 
 /**
  * Notification mutation schemas.
@@ -409,6 +452,32 @@ export class Jobs {
   static status = z.enum(JOB_STATUS_VALUES);
 }
 
+/**
+ * Inventory mutation schemas for batch stock receipt and adjustments.
+ */
+export class Inventory {
+  static stockReceipt = z.object({
+    batchNumber: z.string().trim().min(1, "Nomor batch wajib diisi.").max(80, "Nomor batch maksimal 80 karakter."),
+    expiryDate: ISO_DATE_TEXT_SCHEMA,
+    medicineId: UUID_SCHEMA,
+    purchaseCost: MONEY_TEXT_SCHEMA,
+    quantity: POSITIVE_INT_SCHEMA,
+    receivedDate: ISO_DATE_TEXT_SCHEMA,
+    supplierId: OPTIONAL_UUID_SCHEMA,
+  });
+
+  static stockAdjustment = z.object({
+    adjustmentType: z.enum(["ADJUSTMENT_IN", "ADJUSTMENT_OUT"]),
+    batchId: UUID_SCHEMA,
+    quantity: POSITIVE_INT_SCHEMA,
+    reason: z.string().trim().min(3, "Alasan minimal 3 karakter.").max(300, "Alasan maksimal 300 karakter."),
+  });
+
+  static blockBatch = z.object({
+    reason: z.string().trim().min(3, "Alasan minimal 3 karakter.").max(300, "Alasan maksimal 300 karakter."),
+  });
+}
+
 export type CartAddItemInput = z.infer<typeof Cart.addItem>;
 export type CartCheckoutInput = z.infer<typeof Cart.checkout>;
 export type CartUpdateItemInput = z.infer<typeof Cart.updateItem>;
@@ -431,3 +500,6 @@ export type PrescriptionReviewInput = z.infer<typeof Prescriptions.review>;
 export type ReportRequestInput = z.infer<typeof Reports.request>;
 export type SupplierCreateInput = z.infer<typeof MasterData.supplierCreate>;
 export type SupplierUpdateInput = z.infer<typeof MasterData.supplierUpdate>;
+export type StockReceiptInput = z.infer<typeof Inventory.stockReceipt>;
+export type StockAdjustmentInput = z.infer<typeof Inventory.stockAdjustment>;
+export type BlockBatchInput = z.infer<typeof Inventory.blockBatch>;

@@ -10,6 +10,7 @@ import { JobsClient } from "./jobs";
 import { MedicinesClient } from "./medicines";
 import { NotificationsClient } from "./notifications";
 import { OrdersClient } from "./orders";
+import { QrisSimulatorClient } from "./qris-simulator";
 import { ReportsClient } from "./reports";
 
 /**
@@ -26,6 +27,7 @@ export class Client {
   medicines = new MedicinesClient();
   notifications = new NotificationsClient();
   orders = new OrdersClient();
+  qrisSimulator = new QrisSimulatorClient();
   reports = new ReportsClient();
 }
 

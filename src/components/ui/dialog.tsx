@@ -4,6 +4,7 @@ import { AlertTriangle, Info, Loader2, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { DIALOG_COPY } from "@/constants/design";
+import { OVERLAY_Z_INDEX_CLASS_NAMES } from "@/constants/design";
 import { mc } from "@/utils/mc";
 
 import { Button } from "./button";
@@ -80,7 +81,12 @@ export function Dialog({
   }
 
   return (
-    <section className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-primary-navy/50 p-3 sm:p-4">
+    <section
+      className={mc(
+        "fixed inset-0 grid place-items-center overflow-y-auto bg-primary-navy/50 p-3 sm:p-4",
+        OVERLAY_Z_INDEX_CLASS_NAMES.dialogBackdrop,
+      )}
+    >
       <section
         aria-describedby={ariaDescription}
         aria-labelledby={titleId}
@@ -136,7 +142,8 @@ export type ConfirmDialogVariant = keyof typeof CONFIRM_VARIANT_ICONS;
 export type ConfirmDialogProps = {
   cancelLabel?: string;
   confirmLabel?: string;
-  description: string;
+  description: ReactNode;
+  disabled?: boolean;
   id: string;
   loading?: boolean;
   onCancel: () => void;
@@ -154,6 +161,7 @@ export function ConfirmDialog({
   cancelLabel = DIALOG_COPY.cancel,
   confirmLabel = DIALOG_COPY.confirm,
   description,
+  disabled,
   id,
   loading,
   onCancel,
@@ -170,11 +178,11 @@ export function ConfirmDialog({
     <Dialog
       footer={
         <>
-          <Button disabled={loading} onClick={onCancel} variant="secondary">
+          <Button disabled={loading || disabled} onClick={onCancel} variant="secondary">
             {cancelLabel}
           </Button>
           <Button
-            disabled={loading}
+            disabled={loading || disabled}
             leftIcon={loading ? <Loader2 className="animate-spin" /> : undefined}
             onClick={onConfirm}
             variant={buttonVariant}
@@ -198,7 +206,7 @@ export function ConfirmDialog({
         >
           <Icon className="size-5" />
         </span>
-        <p className="ts-sm text-text-default">{description}</p>
+        <div className="ts-sm text-text-default w-full">{description}</div>
       </article>
     </Dialog>
   );

@@ -2,7 +2,7 @@
 
 import { ClipboardList, Search, X } from "lucide-react";
 import { Helmet } from "react-helmet-async";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -32,6 +32,7 @@ import {
 import { FIELD_CLASS_NAMES } from "@/constants/design";
 import { ROUTES } from "@/constants/routes";
 import { useAuth } from "@/hooks/useAuth";
+import { useDebounce } from "@/hooks/useDebounce";
 import { eden } from "@/lib/eden";
 import { getErrorMessage } from "@/utils/getErrorMessage";
 import { formatDateTime } from "@/utils/inventoryDisplay";
@@ -123,18 +124,9 @@ export default function AuditLogsPage() {
   const user = auth.data?.user;
 
   const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const debouncedSearch = useDebounce(search.trim(), 300);
   const [resultFilter, setResultFilter] = useState("");
   const [page, setPage] = useState(1);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-      setPage(1);
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [search]);
 
   const logsQuery = useAuditLogs({
     page,
@@ -165,7 +157,6 @@ export default function AuditLogsPage() {
 
   const handleClearSearch = () => {
     setSearch("");
-    setDebouncedSearch("");
     setPage(1);
   };
 
@@ -181,7 +172,10 @@ export default function AuditLogsPage() {
         <input
           aria-label="Cari audit log"
           className={mc(FIELD_CLASS_NAMES.control, "pl-9", search && "pr-9")}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           placeholder="Cari aksi, deskripsi, target..."
           type="search"
           value={search}

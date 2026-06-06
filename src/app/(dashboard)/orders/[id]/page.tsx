@@ -10,7 +10,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { use, useState } from "react";
 
 import {
   Badge,
@@ -172,7 +172,7 @@ type PageProps = {
 };
 
 export default function OrderDetailPage({ params }: PageProps) {
-  const { id } = params;
+ const { id } = use(params as any) as { id: string };
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<TransitionTarget>(null);
 

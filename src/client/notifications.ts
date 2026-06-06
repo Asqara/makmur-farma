@@ -129,6 +129,15 @@ export class NotificationsClient {
     };
   }
 
+  async getUnreadCount(audience: NotificationAudience): Promise<number> {
+    const [row] = await readDb
+      .select({ total: countSql() })
+      .from(notifications)
+      .where(and(audienceCondition(audience), eq(notifications.isRead, false)));
+
+    return Number(row?.total ?? 0);
+  }
+
   async markRead(id: string, audience: NotificationAudience) {
     const [notification] = await readDb
       .select()

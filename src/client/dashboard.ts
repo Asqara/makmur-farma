@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import type { OrderStatus } from "@/constants/domain";
 import {
@@ -126,6 +126,7 @@ export class DashboardClient {
       recentOrders,
       failedPayments,
       systemErrors,
+      openCriticalErrorRow,
     ] = await Promise.all([
       readDb
         .select({
@@ -264,6 +265,15 @@ export class DashboardClient {
         .from(applicationErrors)
         .orderBy(desc(applicationErrors.createdAt))
         .limit(5),
+      readDb
+        .select({ total: sql<number>`count(*)` })
+        .from(applicationErrors)
+        .where(
+          and(
+            eq(applicationErrors.severity, "critical"),
+            isNull(applicationErrors.resolvedAt),
+          ),
+        ),
     ]);
 
     const revenue = revenueRow[0]?.total ?? "0";
@@ -347,6 +357,12 @@ export class DashboardClient {
           tone: "danger",
           title: "Stok Habis",
           value: Number(stockRisk?.out ?? 0),
+        },
+        {
+          key: "open-critical-errors",
+          tone: "danger",
+          title: "Error Kritis Terbuka",
+          value: Number(openCriticalErrorRow[0]?.total ?? 0),
         },
       ],
       orderStatus: orderStatusRows.map((row) => ({

@@ -18,6 +18,7 @@ import {
   orderStatusHistory,
   orders,
   payments,
+  paymentEvents,
   prescriptionReviews,
   prescriptions,
   users,
@@ -36,7 +37,7 @@ import {
   toString,
   type ListResponse,
 } from "./list-utils";
-import { assertOrderTransition } from "./order-rules";
+import { assertOrderTransition, calculateOrderTotals } from "./order-rules";
 
 const ORDER_SORT_FIELDS = {
   createdAt: orders.createdAt,
@@ -685,6 +686,185 @@ export class OrdersClient {
     });
   }
 
+  /**
+   * Admin manual override for a payment status.
+   * Only Admin role may call this. Idempotent when the payment is already in
+   * the requested terminal state. Produces a paymentEvent, audit log, and
+   * Admin-targeted in-app notification.
+   */
+  async adminOverridePayment(
+    paymentId: string,
+    overrideStatus: "PAID" | "CANCELLED" | "REFUNDED",
+    reason: string,
+    actorUserId: string,
+  ): Promise<{ ok: true }> {
+    const now = new Date();
+
+    return db.transaction(async (tx) => {
+      const [payment] = await tx
+        .select({
+          amount: payments.amount,
+          id: payments.id,
+          orderId: payments.orderId,
+          status: payments.status,
+        })
+        .from(payments)
+        .where(eq(payments.id, paymentId))
+        .limit(1);
+
+      if (!payment) {
+        throw new NotFoundAppError("Pembayaran tidak ditemukan.");
+      }
+
+      // Idempotency: already in the requested state.
+      if (payment.status === overrideStatus) {
+        return { ok: true as const };
+      }
+
+      // Guard: cannot mark PAID if already cancelled/failed/expired/refunded.
+      if (
+        overrideStatus === "PAID" &&
+        (payment.status === "CANCELLED" ||
+          payment.status === "FAILED" ||
+          payment.status === "EXPIRED" ||
+          payment.status === "REFUNDED")
+      ) {
+        throw new ValidationAppError(
+          "Tidak dapat menandai lunas pembayaran yang sudah dibatalkan atau gagal.",
+        );
+      }
+
+      // Guard: cannot cancel/refund an already-paid payment without REFUNDED path.
+      if (overrideStatus === "CANCELLED" && payment.status === "PAID") {
+        throw new ValidationAppError(
+          "Pembayaran yang sudah lunas tidak dapat dibatalkan. Gunakan opsi Refund.",
+        );
+      }
+
+      const [order] = await tx
+        .select({
+          customerUserId: orders.customerUserId,
+          id: orders.id,
+          orderNumber: orders.orderNumber,
+          status: orders.status,
+        })
+        .from(orders)
+        .where(eq(orders.id, payment.orderId))
+        .limit(1);
+
+      if (!order) {
+        throw new NotFoundAppError("Pesanan untuk pembayaran ini tidak ditemukan.");
+      }
+
+      // 1. Insert payment event.
+      await tx.insert(paymentEvents).values({
+        eventType: "admin.override",
+        paymentId,
+        safePayload: {
+          actorId: actorUserId,
+          note: "Admin manual override",
+          previousStatus: payment.status,
+          reason,
+        },
+        status: overrideStatus,
+      });
+
+      // 2. Update payment record.
+      await tx
+        .update(payments)
+        .set({
+          paidAt: overrideStatus === "PAID" ? now : undefined,
+          status: overrideStatus,
+          updatedAt: now,
+        })
+        .where(eq(payments.id, paymentId));
+
+      // 3. Transition order status.
+      const nextOrderStatus: OrderStatus =
+        overrideStatus === "PAID"
+          ? "PROCESSING"
+          : overrideStatus === "CANCELLED"
+            ? "CANCELLED"
+            : "REFUNDED";
+
+      if (canTransitionOrder(order.status, nextOrderStatus)) {
+        await tx
+          .update(orders)
+          .set({ status: nextOrderStatus, updatedAt: now })
+          .where(eq(orders.id, order.id));
+
+        await tx.insert(orderStatusHistory).values({
+          actorUserId,
+          fromStatus: order.status,
+          metadata: {
+            adminOverride: true,
+            overrideStatus,
+            reason,
+          },
+          note: `Override admin: ${reason}`,
+          orderId: order.id,
+          toStatus: nextOrderStatus,
+        });
+      }
+
+      // 4. Notify customer if applicable.
+      if (order.customerUserId) {
+        const notificationTitle =
+          overrideStatus === "PAID"
+            ? "Pembayaran Dikonfirmasi Admin"
+            : overrideStatus === "CANCELLED"
+              ? "Pembayaran Dibatalkan Admin"
+              : "Pembayaran Direfund Admin";
+        const notificationMessage =
+          overrideStatus === "PAID"
+            ? `Pembayaran untuk pesanan ${order.orderNumber} dikonfirmasi oleh admin.`
+            : overrideStatus === "CANCELLED"
+              ? `Pembayaran untuk pesanan ${order.orderNumber} dibatalkan oleh admin.`
+              : `Pembayaran untuk pesanan ${order.orderNumber} direfund oleh admin.`;
+
+        await tx.insert(notifications).values({
+          actionHref: `/orders/${order.id}`,
+          dedupeKey: `payment:${paymentId}:override:${overrideStatus}`,
+          message: notificationMessage,
+          severity: overrideStatus === "PAID" ? "success" : "warning",
+          title: notificationTitle,
+          type: "PAYMENT_STATUS",
+          userId: order.customerUserId,
+        });
+      }
+
+      // 5. Notify Admin role about the override for traceability.
+      await tx.insert(notifications).values({
+        actionHref: `/payments/${paymentId}`,
+        dedupeKey: `payment:${paymentId}:override:admin:${overrideStatus}:${actorUserId}`,
+        message: `Admin melakukan override pembayaran pesanan ${order.orderNumber} ke status ${overrideStatus}. Alasan: ${reason}`,
+        roleTarget: "ADMIN",
+        severity: "warning",
+        title: "Override Pembayaran oleh Admin",
+        type: "PAYMENT_STATUS",
+      });
+
+      // 6. Audit log.
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.PAYMENT_OVERRIDE,
+        actorRole: "ADMIN",
+        actorUserId,
+        description: `Admin override pembayaran ke ${overrideStatus}. Alasan: ${reason}`,
+        metadata: {
+          orderNumber: order.orderNumber,
+          overrideStatus,
+          paymentId,
+          reason,
+        },
+        result: "SUCCESS",
+        targetId: paymentId,
+        targetType: "payment",
+      });
+
+      return { ok: true as const };
+    });
+  }
+
   async getOrderItemCount(orderId: string) {
     const [row] = await readDb
       .select({ total: countSql() })
@@ -692,5 +872,160 @@ export class OrdersClient {
       .where(eq(orderItems.orderId, orderId));
 
     return Number(row?.total ?? 0);
+  }
+
+  /**
+   * Creates a counter sale (OFFLINE channel) with immediate payment confirmation.
+   * This mimics the cashier workflow where items are selected, payment is taken,
+   * and the order is immediately marked as PAID/PROCESSING.
+   */
+  async createCashierOrder(
+    input: {
+      items: Array<{ medicineId: string; quantity: number }>;
+      paymentMethod: string;
+      customerUserId?: string | null;
+    },
+    actor: { actorUserId: string; actorRole: UserRole; requestContext: RequestContext },
+  ): Promise<{ orderId: string; orderNumber: string }> {
+    const now = new Date();
+
+    if (input.items.length === 0) {
+      throw new ValidationAppError("Daftar belanja tidak boleh kosong.");
+    }
+
+    return db.transaction(async (tx) => {
+      // 1. Fetch medicine details and validate status.
+      const medicineIds = input.items.map((i) => i.medicineId);
+      const medicineDetails = await tx
+        .select({
+          id: medicines.id,
+          name: medicines.name,
+          prescriptionRequired: medicines.prescriptionRequired,
+          sellingPrice: medicines.sellingPrice,
+          status: medicines.status,
+        })
+        .from(medicines)
+        .where(sql`${medicines.id} in ${medicineIds}`);
+
+      const medicineMap = new Map(medicineDetails.map((m) => [m.id, m]));
+
+      for (const item of input.items) {
+        const detail = medicineMap.get(item.medicineId);
+        if (!detail || detail.status !== "ACTIVE") {
+          throw new ValidationAppError(
+            `Obat "${detail?.name || item.medicineId}" tidak tersedia.`,
+          );
+        }
+      }
+
+      // 2. Calculate totals.
+      const lines = input.items.map((item) => {
+        const detail = medicineMap.get(item.medicineId)!;
+        return {
+          prescriptionRequired: detail.prescriptionRequired,
+          quantity: item.quantity,
+          unitPrice: detail.sellingPrice,
+        };
+      });
+
+      const totals = calculateOrderTotals(lines);
+
+      // 3. Create order.
+      const orderNumber = `OFL-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+      const [order] = await tx
+        .insert(orders)
+        .values({
+          cashierUserId: actor.actorUserId,
+          channel: "COUNTER",
+          customerUserId: input.customerUserId ?? null,
+          discountTotal: totals.discountTotal,
+          grandTotal: totals.grandTotal,
+          orderNumber,
+          prescriptionRequired: totals.prescriptionRequired,
+          status: "PAID",
+          subtotal: totals.subtotal,
+          taxTotal: totals.taxTotal,
+        })
+        .returning();
+
+      // 4. Create order items.
+      await tx.insert(orderItems).values(
+        input.items.map((item) => {
+          const detail = medicineMap.get(item.medicineId)!;
+          return {
+            medicineId: item.medicineId,
+            orderId: order.id,
+            prescriptionRequired: detail.prescriptionRequired,
+            quantity: item.quantity,
+            subtotal: (
+              Math.round(Number(detail.sellingPrice) * 100 * item.quantity) / 100
+            ).toFixed(2),
+            unitPrice: detail.sellingPrice,
+          };
+        }),
+      );
+
+      // 5. Create payment (immediately PAID).
+      const [payment] = await tx
+        .insert(payments)
+        .values({
+          amount: totals.grandTotal,
+          method: input.paymentMethod as any,
+          orderId: order.id,
+          paidAt: now,
+          provider: "cashier",
+          status: "PAID",
+        })
+        .returning();
+
+      // 6. Record status history.
+      await tx.insert(orderStatusHistory).values({
+        actorUserId: actor.actorUserId,
+        fromStatus: null,
+        metadata: { cashierId: actor.actorUserId, channel: "COUNTER" },
+        note: "Penjualan langsung di kasir.",
+        orderId: order.id,
+        toStatus: "PAID",
+      });
+
+      // 7. Transition to PROCESSING.
+      await tx
+        .update(orders)
+        .set({ status: "PROCESSING", updatedAt: now })
+        .where(eq(orders.id, order.id));
+
+      await tx.insert(orderStatusHistory).values({
+        actorUserId: actor.actorUserId,
+        fromStatus: "PAID",
+        metadata: { channel: "COUNTER" },
+        note: "Pesanan otomatis diproses setelah pembayaran kasir.",
+        orderId: order.id,
+        toStatus: "PROCESSING",
+      });
+
+      // 8. Audit log.
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.ORDER_STATUS_CHANGED,
+        actorRole: actor.actorRole,
+        actorUserId: actor.actorUserId,
+        correlationId: actor.requestContext.correlationId,
+        description: `Transaksi kasir berhasil: ${orderNumber}`,
+        ipAddress: actor.requestContext.ipAddress,
+        metadata: {
+          grandTotal: totals.grandTotal,
+          orderNumber,
+          paymentMethod: input.paymentMethod,
+        },
+        result: "SUCCESS",
+        targetId: order.id,
+        targetType: "order",
+        userAgent: actor.requestContext.userAgent,
+      });
+
+      return {
+        orderId: order.id,
+        orderNumber,
+      };
+    });
   }
 }

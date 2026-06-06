@@ -234,6 +234,69 @@ export class CartClient {
   }
 
   /**
+   * Merges items from local storage (provided by client) into the customer's active cart.
+   * If a medicine already exists in the cart, the quantity is added.
+   */
+  async mergeLocalCart(
+    userId: string,
+    items: Array<{ medicineId: string; quantity: number }>,
+  ): Promise<CartDetail> {
+    if (items.length === 0) {
+      return this.getCart(userId);
+    }
+
+    const cart = await this.ensureActiveCart(userId);
+
+    await db.transaction(async (tx) => {
+      for (const item of items) {
+        if (!Number.isInteger(item.quantity) || item.quantity < 1) continue;
+
+        const [medicine] = await tx
+          .select({ id: medicines.id })
+          .from(medicines)
+          .where(and(eq(medicines.id, item.medicineId), eq(medicines.status, "ACTIVE")))
+          .limit(1);
+
+        if (!medicine) continue;
+
+        const [existing] = await tx
+          .select({ id: cartItems.id, quantity: cartItems.quantity })
+          .from(cartItems)
+          .where(
+            and(
+              eq(cartItems.cartId, cart.id),
+              eq(cartItems.medicineId, item.medicineId),
+            ),
+          )
+          .limit(1);
+
+        if (existing) {
+          await tx
+            .update(cartItems)
+            .set({
+              quantity: existing.quantity + item.quantity,
+              updatedAt: new Date(),
+            })
+            .where(eq(cartItems.id, existing.id));
+        } else {
+          await tx.insert(cartItems).values({
+            cartId: cart.id,
+            medicineId: item.medicineId,
+            quantity: item.quantity,
+          });
+        }
+      }
+
+      await tx
+        .update(carts)
+        .set({ updatedAt: new Date() })
+        .where(eq(carts.id, cart.id));
+    });
+
+    return this.getCart(userId);
+  }
+
+  /**
    * Creates an order from the customer's active cart.
    * Prices are always re-fetched from the database — never trusted from the cart.
    * Stock reservation happens in the background worker after the order is created.
