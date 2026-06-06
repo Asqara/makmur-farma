@@ -216,7 +216,7 @@ export class ImportsClient {
     };
 
     await queue.add("MEDICINE_IMPORT", payload, {
-      jobId: jobRun.jobKey,
+      jobId: jobRun.id,
     });
 
     return importRun;

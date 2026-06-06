@@ -104,27 +104,6 @@ export default function PrescriptionsPage() {
     queryKey: ["prescriptions"],
   });
 
-  const startReviewMutation = useMutation({
-    mutationFn: async (prescriptionId: string) => {
-      const response = await eden.api.v1.prescriptions({ id: prescriptionId }).review.post({
-        approvedItems: [],
-        decision: "APPROVED",
-        notes: "",
-      });
-
-      if (response.error) throw response.error;
-
-      return response.data;
-    },
-    onError: () => {
-      toast.error("Gagal memulai tinjauan. Coba lagi.");
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["prescriptions"] });
-      toast.info("Resep sedang ditinjau.");
-    },
-  });
-
   const reviewMutation = useMutation({
     mutationFn: async ({
       id,
@@ -197,8 +176,9 @@ export default function PrescriptionsPage() {
               </TableHeader>
               <TableBody>
                 {query.data.data.map((prescription) => {
-                  const canStartReview = prescription.status === "PENDING";
-                  const canReview = prescription.status === "IN_REVIEW";
+                  const canReview = ["PENDING", "IN_REVIEW"].includes(
+                    prescription.status,
+                  );
 
                   return (
                     <TableRow key={prescription.id}>
@@ -245,18 +225,9 @@ export default function PrescriptionsPage() {
                                 }),
                             },
                             {
-                              disabled: !canStartReview,
-                              icon: <ClipboardCheck />,
-                              label: "Mulai Tinjauan",
-                              onSelect: canStartReview
-                                ? () =>
-                                    startReviewMutation.mutate(prescription.id)
-                                : undefined,
-                            },
-                            {
                               disabled: !canReview,
                               icon: <ClipboardCheck />,
-                              label: "Tinjau & Putuskan",
+                              label: "Tinjau dan Putuskan",
                               onSelect: canReview
                                 ? () =>
                                     setReviewTarget({

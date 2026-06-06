@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { createId } from "@paralleldrive/cuid2";
@@ -31,6 +31,7 @@ import {
   createQueueWorker,
   type QueueJobEnvelope,
 } from "@/lib/queue";
+import { putPrivateObject } from "@/lib/object-storage";
 import { InventoryWorkflowClient } from "@/client/inventory";
 
 type WorkerPayload = QueueJobEnvelope<Record<string, unknown>>;
@@ -245,9 +246,7 @@ async function processReportJob(payload: WorkerPayload) {
 
     const pdf = createSimplePdf(lines);
     const relativeObjectKey = `private/reports/${report.id}.pdf`;
-    const targetPath = path.join(PRIVATE_STORAGE_ROOT, relativeObjectKey);
-    await mkdir(path.dirname(targetPath), { recursive: true });
-    await writeFile(targetPath, pdf);
+    await putPrivateObject(relativeObjectKey, pdf, "application/pdf");
 
     await db
       .update(reportRuns)

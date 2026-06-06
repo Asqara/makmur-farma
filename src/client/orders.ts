@@ -1,6 +1,6 @@
 import "server-only";
 
-import { asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 
 import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
 import { canTransitionOrder } from "@/constants/domain";
@@ -576,6 +576,21 @@ export class OrdersClient {
           await inventoryWorkflow.reserveOrderStockTx(tx, order.id, {
             actorUserId: input.actorUserId,
           });
+
+          // Extend or reactivate the payment so the customer can pay.
+          // The payment was created at checkout with a 24h window; prescription
+          // review can take longer, leaving the payment expired by the time the
+          // order reaches AWAITING_PAYMENT.
+          const newExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          await tx
+            .update(payments)
+            .set({ expiresAt: newExpiresAt, status: "PENDING", updatedAt: now })
+            .where(
+              and(
+                eq(payments.orderId, order.id),
+                inArray(payments.status, ["PENDING", "EXPIRED"]),
+              ),
+            );
         }
 
         await tx
@@ -653,6 +668,34 @@ export class OrdersClient {
 
       if (!currentOrder) {
         throw new NotFoundAppError("Pesanan tidak ditemukan.");
+      }
+
+      // Counter orders skip electronic prescription review — the cashier
+      // verifies in person. Only online orders require an approved prescription
+      // record before fulfilment can begin.
+      if (
+        currentOrder.channel !== "COUNTER" &&
+        currentOrder.prescriptionRequired &&
+        ["PROCESSING", "READY_FOR_PICKUP", "SHIPPED", "COMPLETED"].includes(
+          input.nextStatus,
+        )
+      ) {
+        const [approvedPrescription] = await tx
+          .select({ id: prescriptions.id })
+          .from(prescriptions)
+          .where(
+            and(
+              eq(prescriptions.orderId, currentOrder.id),
+              eq(prescriptions.status, "APPROVED"),
+            ),
+          )
+          .limit(1);
+
+        if (!approvedPrescription) {
+          throw new ValidationAppError(
+            "Pesanan obat resep belum dapat diproses atau diambil sebelum resep disetujui.",
+          );
+        }
       }
 
       assertOrderTransition(currentOrder.status, input.nextStatus);
@@ -806,9 +849,11 @@ export class OrdersClient {
         .where(eq(payments.id, paymentId));
 
       // 3. Transition order status.
+      // Payment confirmed → move to PAID (not directly to PROCESSING).
+      // AWAITING_PAYMENT → PAID is valid; AWAITING_PAYMENT → PROCESSING is not.
       const nextOrderStatus: OrderStatus =
         overrideStatus === "PAID"
-          ? "PROCESSING"
+          ? "PAID"
           : overrideStatus === "CANCELLED"
             ? "CANCELLED"
             : "REFUNDED";
@@ -1056,6 +1101,42 @@ export class OrdersClient {
         orderId: order.id,
         orderNumber,
       };
+    });
+  }
+
+  /**
+   * Returns the first PENDING payment for each of the given order IDs,
+   * filtered to orders owned by the specified customer.
+   * Used to surface a "Pay Now" link after prescription approval.
+   */
+  async getOrderPendingPayments(
+    orderIds: string[],
+    customerUserId: string,
+  ): Promise<Array<{ id: string; method: string; orderId: string }>> {
+    if (orderIds.length === 0) return [];
+
+    const rows = await readDb
+      .select({
+        id: payments.id,
+        method: payments.method,
+        orderId: payments.orderId,
+      })
+      .from(payments)
+      .innerJoin(orders, eq(payments.orderId, orders.id))
+      .where(
+        and(
+          inArray(payments.orderId, orderIds),
+          eq(orders.customerUserId, customerUserId),
+          eq(payments.status, "PENDING"),
+        ),
+      );
+
+    // Keep only the first payment per order
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      if (seen.has(row.orderId)) return false;
+      seen.add(row.orderId);
+      return true;
     });
   }
 }

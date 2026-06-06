@@ -27,14 +27,18 @@ export function getLocalCart(): LocalCartItem[] {
   }
 }
 
+const CART_UPDATE_EVENT = "makmur:cart-update";
+
 export function saveLocalCart(items: LocalCartItem[]) {
   if (typeof window === "undefined") return;
   localStorage.setItem(LOCAL_CART_KEY, JSON.stringify(items));
+  window.dispatchEvent(new CustomEvent(CART_UPDATE_EVENT));
 }
 
 export function clearLocalCart() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(LOCAL_CART_KEY);
+  window.dispatchEvent(new CustomEvent(CART_UPDATE_EVENT));
 }
 
 /**
@@ -46,6 +50,15 @@ export function useCart() {
   const [localItems, setLocalItems] = useState<LocalCartItem[]>(getLocalCart);
 
   const isAuthenticated = !!auth?.user;
+
+  // Keep guest cart in sync across all useCart instances on the same page.
+  useEffect(() => {
+    if (isAuthenticated) return;
+
+    const sync = () => setLocalItems(getLocalCart());
+    window.addEventListener(CART_UPDATE_EVENT, sync);
+    return () => window.removeEventListener(CART_UPDATE_EVENT, sync);
+  }, [isAuthenticated]);
 
   // Server cart query
   const serverCartQuery = useQuery({

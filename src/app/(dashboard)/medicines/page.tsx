@@ -133,7 +133,7 @@ export default function MedicinesPage() {
             />
             <section className="flex min-h-10 items-center gap-2 text-text-muted">
               <Search aria-hidden="true" className="size-4" />
-              <span className="ts-sm">Search diproses server-side.</span>
+              <span className="ts-sm"></span>
             </section>
             <section className="flex min-h-10 items-end">
               <ButtonLink

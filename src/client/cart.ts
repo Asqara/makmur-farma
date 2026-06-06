@@ -1,16 +1,25 @@
 import "server-only";
 
+import { createId } from "@paralleldrive/cuid2";
 import { and, eq, sql } from "drizzle-orm";
 
+import { AUDIT_ACTIONS } from "@/constants/auth";
 import {
+  PRESCRIPTION_FILE_ALLOWED_MIME_TYPES,
+  PRESCRIPTION_FILE_LIMIT_BYTES,
+} from "@/constants/upload";
+import {
+  auditLogs,
   cartItems,
   carts,
   medicines,
   medicineCategories,
+  notifications,
   orderItems,
   orderStatusHistory,
   orders,
   payments,
+  prescriptions,
 } from "@/drizzle-schema";
 import { db, readDb } from "@/lib/db";
 import {
@@ -18,6 +27,8 @@ import {
   NotFoundAppError,
   ValidationAppError,
 } from "@/lib/errors";
+import { putPrivateObject } from "@/lib/object-storage";
+import type { RequestContext } from "@/lib/request";
 import type { PaymentMethod } from "@/constants/domain";
 
 import { InventoryWorkflowClient } from "./inventory";
@@ -61,6 +72,25 @@ export type CheckoutResult = {
     status: string;
   };
 };
+
+type SubmitPrescriptionInput = {
+  bytes: Buffer;
+  contentType: string;
+  fileName: string;
+  orderId: string;
+  requestContext: RequestContext;
+  sizeBytes: number;
+};
+
+function sanitizeFileName(fileName: string) {
+  const sanitized = fileName
+    .trim()
+    .replace(/[/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 120);
+
+  return sanitized || "resep";
+}
 
 /**
  * Cart and checkout business logic. All operations enforce customer ownership.
@@ -491,6 +521,144 @@ export class CartClient {
           status: newPayment.status,
         },
       };
+    });
+  }
+
+  async submitPrescription(userId: string, input: SubmitPrescriptionInput) {
+    const allowedTypes = new Set<string>(PRESCRIPTION_FILE_ALLOWED_MIME_TYPES);
+
+    if (!allowedTypes.has(input.contentType)) {
+      throw new ValidationAppError("File resep harus berupa PDF, JPG, atau PNG.");
+    }
+
+    if (
+      input.sizeBytes <= 0 ||
+      input.sizeBytes > PRESCRIPTION_FILE_LIMIT_BYTES ||
+      input.bytes.byteLength > PRESCRIPTION_FILE_LIMIT_BYTES
+    ) {
+      throw new ValidationAppError("Ukuran file resep maksimal 5 MB.");
+    }
+
+    const [order] = await readDb
+      .select({
+        id: orders.id,
+        orderNumber: orders.orderNumber,
+        prescriptionRequired: orders.prescriptionRequired,
+        status: orders.status,
+      })
+      .from(orders)
+      .where(and(eq(orders.id, input.orderId), eq(orders.customerUserId, userId)))
+      .limit(1);
+
+    if (!order) {
+      throw new NotFoundAppError("Pesanan tidak ditemukan.");
+    }
+
+    if (!order.prescriptionRequired) {
+      throw new ValidationAppError("Pesanan ini tidak memerlukan resep.");
+    }
+
+    if (!["AWAITING_PRESCRIPTION", "PRESCRIPTION_REVIEW"].includes(order.status)) {
+      throw new ValidationAppError(
+        "Resep hanya dapat diunggah saat pesanan menunggu resep atau sedang ditinjau.",
+      );
+    }
+
+    const [approvedPrescription] = await readDb
+      .select({ id: prescriptions.id })
+      .from(prescriptions)
+      .where(
+        and(
+          eq(prescriptions.orderId, order.id),
+          eq(prescriptions.status, "APPROVED"),
+        ),
+      )
+      .limit(1);
+
+    if (approvedPrescription) {
+      throw new ValidationAppError("Resep untuk pesanan ini sudah disetujui.");
+    }
+
+    const objectKey = `private/prescriptions/${order.id}/${createId()}-${sanitizeFileName(input.fileName)}`;
+    await putPrivateObject(objectKey, input.bytes, input.contentType);
+
+    return db.transaction(async (tx) => {
+      const [createdPrescription] = await tx
+        .insert(prescriptions)
+        .values({
+          contentType: input.contentType,
+          customerUserId: userId,
+          orderId: order.id,
+          originalFileName: input.fileName,
+          originalObjectKey: objectKey,
+          sizeBytes: input.sizeBytes,
+          status: "PENDING",
+        })
+        .returning();
+
+      if (order.status === "AWAITING_PRESCRIPTION") {
+        await tx
+          .update(orders)
+          .set({
+            status: "PRESCRIPTION_REVIEW",
+            updatedAt: new Date(),
+          })
+          .where(eq(orders.id, order.id));
+
+        await tx.insert(orderStatusHistory).values({
+          actorUserId: userId,
+          fromStatus: order.status,
+          metadata: {
+            prescriptionId: createdPrescription.id,
+          },
+          note: "Resep pelanggan diunggah dan menunggu verifikasi.",
+          orderId: order.id,
+          toStatus: "PRESCRIPTION_REVIEW",
+        });
+      }
+
+      await tx.insert(notifications).values([
+        {
+          actionHref: "/prescriptions",
+          dedupeKey: `prescription:${createdPrescription.id}:review:pharmacist`,
+          message: `Resep baru untuk pesanan ${order.orderNumber} menunggu verifikasi.`,
+          roleTarget: "PHARMACIST",
+          severity: "warning",
+          title: "Resep Baru Menunggu Verifikasi",
+          type: "PRESCRIPTION_REVIEW",
+        },
+        {
+          actionHref: "/prescriptions",
+          dedupeKey: `prescription:${createdPrescription.id}:review:admin`,
+          message: `Resep baru untuk pesanan ${order.orderNumber} menunggu verifikasi.`,
+          roleTarget: "ADMIN",
+          severity: "warning",
+          title: "Resep Baru Menunggu Verifikasi",
+          type: "PRESCRIPTION_REVIEW",
+        },
+      ]);
+
+      await tx.insert(auditLogs).values({
+        action: AUDIT_ACTIONS.PRESCRIPTION_UPLOADED,
+        actorRole: "CUSTOMER",
+        actorUserId: userId,
+        correlationId: input.requestContext.correlationId,
+        description: "Pelanggan mengunggah file resep asli ke object storage privat.",
+        ipAddress: input.requestContext.ipAddress,
+        metadata: {
+          contentType: input.contentType,
+          fileName: input.fileName,
+          orderNumber: order.orderNumber,
+          prescriptionId: createdPrescription.id,
+          sizeBytes: input.sizeBytes,
+        },
+        result: "SUCCESS",
+        targetId: createdPrescription.id,
+        targetType: "prescription",
+        userAgent: input.requestContext.userAgent,
+      });
+
+      return createdPrescription;
     });
   }
 

@@ -71,11 +71,14 @@ export class QrisSimulatorClient {
       .select({
         id: payments.id,
         method: payments.method,
+        orderPrescriptionRequired: orders.prescriptionRequired,
+        orderStatus: orders.status,
         provider: payments.provider,
         providerReference: payments.providerReference,
         status: payments.status,
       })
       .from(payments)
+      .innerJoin(orders, eq(payments.orderId, orders.id))
       .where(eq(payments.id, paymentId))
       .limit(1);
 
@@ -89,6 +92,15 @@ export class QrisSimulatorClient {
 
     if (TERMINAL_PAYMENT_STATUSES.has(payment.status)) {
       throw new ValidationAppError("Pembayaran sudah dalam status final.");
+    }
+
+    if (
+      payment.orderPrescriptionRequired &&
+      !["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(payment.orderStatus)
+    ) {
+      throw new ValidationAppError(
+        "Pembayaran obat resep hanya dapat dilakukan setelah resep disetujui.",
+      );
     }
 
     // Re-use existing simReference if already initialized.
@@ -175,6 +187,7 @@ export class QrisSimulatorClient {
         customerUserId: orders.customerUserId,
         id: orders.id,
         orderNumber: orders.orderNumber,
+        prescriptionRequired: orders.prescriptionRequired,
         status: orders.status,
       })
       .from(orders)
@@ -187,6 +200,16 @@ export class QrisSimulatorClient {
 
     const newPaymentStatus: PaymentStatus =
       outcome === "PAID" ? "PAID" : outcome === "FAILED" ? "FAILED" : "EXPIRED";
+
+    if (
+      outcome === "PAID" &&
+      order.prescriptionRequired &&
+      !["AWAITING_PAYMENT", "PAYMENT_PENDING"].includes(order.status)
+    ) {
+      throw new ValidationAppError(
+        "Pembayaran obat resep hanya dapat dikonfirmasi setelah resep disetujui.",
+      );
+    }
 
     await db.transaction(async (tx) => {
       // 1. Create payment event.

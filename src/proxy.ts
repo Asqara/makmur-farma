@@ -5,16 +5,23 @@ import { SESSION_COOKIE_NAME } from "@/constants/cookies";
 import { ROUTES } from "@/constants/routes";
 
 const PUBLIC_PATHS = [
+  "/",
   ROUTES.ACCESS_DENIED,
+  ROUTES.CART,
+  ROUTES.CATALOG.INDEX,
   ROUTES.CHECK_EMAIL,
   ROUTES.LOGIN,
   ROUTES.LOGOUT,
+  ROUTES.PROFILE,
   ROUTES.REGISTER,
   ROUTES.VERIFY_EMAIL,
 ];
 
 function isPublicPath(pathname: string) {
-  return PUBLIC_PATHS.some((path) => pathname === path);
+  return (
+    PUBLIC_PATHS.some((path) => pathname === path) ||
+    pathname.startsWith(`${ROUTES.CATALOG.INDEX}/`)
+  );
 }
 
 /**
@@ -24,7 +31,10 @@ export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME));
 
-  if (pathname === ROUTES.LOGIN && hasSession) {
+  const isSessionExpiredReason =
+    request.nextUrl.searchParams.get("reason") === "session-expired";
+
+  if (pathname === ROUTES.LOGIN && hasSession && !isSessionExpiredReason) {
     return NextResponse.redirect(new URL(ROUTES.DASHBOARD, request.url));
   }
 

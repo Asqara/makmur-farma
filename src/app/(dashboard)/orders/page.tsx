@@ -68,6 +68,7 @@ type OrdersResponse = {
 const TRANSITION_ACTION_LABELS: Partial<Record<OrderStatus, string>> = {
   CANCELLED: "Batalkan Pesanan",
   COMPLETED: "Selesaikan",
+  PAID: "Konfirmasi Pembayaran",
   PROCESSING: "Proses Pesanan",
   READY_FOR_PICKUP: "Siap Diambil",
   SHIPPED: "Kirim",
@@ -76,6 +77,7 @@ const TRANSITION_ACTION_LABELS: Partial<Record<OrderStatus, string>> = {
 const TRANSITION_ACTION_ICONS: Partial<Record<OrderStatus, ReactNode>> = {
   CANCELLED: <X />,
   COMPLETED: <CheckCircle />,
+  PAID: <CheckCircle />,
   PROCESSING: <Package />,
   READY_FOR_PICKUP: <PackageCheck />,
   SHIPPED: <Truck />,
@@ -84,6 +86,7 @@ const TRANSITION_ACTION_ICONS: Partial<Record<OrderStatus, ReactNode>> = {
 const TRANSITION_CONFIRM_LABELS: Partial<Record<OrderStatus, string>> = {
   CANCELLED: "Ya, Batalkan",
   COMPLETED: "Ya, Selesaikan",
+  PAID: "Ya, Konfirmasi",
   PROCESSING: "Ya, Proses",
   READY_FOR_PICKUP: "Ya, Siap Diambil",
   SHIPPED: "Ya, Kirim",
@@ -92,6 +95,7 @@ const TRANSITION_CONFIRM_LABELS: Partial<Record<OrderStatus, string>> = {
 const TRANSITION_DESCRIPTIONS: Partial<Record<OrderStatus, string>> = {
   CANCELLED: "Pesanan akan dibatalkan dan stok yang direservasi akan dilepas.",
   COMPLETED: "Pesanan akan ditandai selesai.",
+  PAID: "Tandai pembayaran pesanan ini sebagai lunas secara manual.",
   PROCESSING: "Pesanan akan mulai diproses.",
   READY_FOR_PICKUP: "Pesanan akan ditandai siap diambil oleh pelanggan.",
   SHIPPED: "Pesanan akan ditandai telah dikirim.",
@@ -141,8 +145,10 @@ export default function OrdersPage() {
 
       return response.data;
     },
-    onError: () => {
-      toast.error("Transisi status pesanan gagal. Coba lagi.");
+    onError: (error: unknown) => {
+      const message =
+        (error as { message?: string })?.message ?? "Transisi status pesanan gagal. Coba lagi.";
+      toast.error(message);
     },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });

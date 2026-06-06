@@ -1,4 +1,6 @@
 export * from "./action-menu";
+export * from "./customer-navbar";
+export * from "./prescription-upload-dialog";
 export * from "./alert-card";
 export * from "./app-shell";
 export * from "./app-toaster";

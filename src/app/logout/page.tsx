@@ -6,7 +6,6 @@ import { Helmet } from "react-helmet-async";
 
 import { BrandLogo } from "@/components/ui";
 import { APP_META_DESCRIPTION, APP_NAME } from "@/constants/app";
-import { ROUTES } from "@/constants/routes";
 import { useLogoutMutation } from "@/hooks/useAuth";
 
 /**
@@ -20,11 +19,14 @@ export default function LogoutPage() {
     if (hasSubmitted.current) return;
     hasSubmitted.current = true;
 
-    logout.mutate(undefined, {
-      onSettled: () => {
-        window.location.replace(`${ROUTES.LOGIN}?reason=logout`);
-      },
-    });
+    // mutateAsync attaches the redirect to the Promise directly so it fires
+    // even if the component unmounts before the request completes.
+    logout
+      .mutateAsync(undefined)
+      .catch(() => {})
+      .finally(() => {
+        window.location.replace("/");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -39,10 +41,10 @@ export default function LogoutPage() {
         <section className="grid gap-2">
           <LogOut aria-hidden="true" className="mx-auto size-8 text-primary-blue" />
           <h1 className="ts-xl font-semibold text-text-strong">
-            Menghapus sesi...
+            Mengakhiri sesi...
           </h1>
           <p className="ts-sm text-text-muted">
-            Anda akan diarahkan ke halaman masuk.
+            Anda akan diarahkan ke beranda.
           </p>
         </section>
       </section>

@@ -576,10 +576,13 @@ export const v1Api = new Elysia()
     const parsedParams = parseBody(MasterData.idParams, params);
     const file = await client.reports.getDownload(parsedParams.id);
 
-    set.headers["Content-Type"] = "application/pdf";
+    set.headers["Content-Type"] = file.contentType || "application/pdf";
     set.headers["Content-Disposition"] = `attachment; filename="${file.filename}"`;
 
-    return new Response(file.bytes);
+    const body = new Uint8Array(file.bytes.byteLength);
+    body.set(file.bytes);
+
+    return new Response(body.buffer);
   })
   .post("/api/v1/reports", async ({ body, request }) => {
     const session = await requireSession(request);
@@ -686,10 +689,33 @@ export const v1Api = new Elysia()
     const session = await requireSession(request);
     requireRole(session, ["CUSTOMER"]);
 
-    return client.orders.listOrders({
+    const result = await client.orders.listOrders({
       ...(query as Record<string, unknown>),
       customerUserId: session.userId,
     });
+
+    // Surface pending payment info for AWAITING_PAYMENT orders so the customer
+    // can navigate directly to the payment page after prescription approval.
+    const awaitingIds = result.data
+      .filter((o) => o.status === "AWAITING_PAYMENT")
+      .map((o) => o.id);
+
+    const pendingPayments = await client.orders.getOrderPendingPayments(
+      awaitingIds,
+      session.userId,
+    );
+
+    const paymentByOrderId = Object.fromEntries(
+      pendingPayments.map((p) => [p.orderId, { id: p.id, method: p.method }]),
+    );
+
+    return {
+      ...result,
+      data: result.data.map((order) => ({
+        ...order,
+        pendingPayment: paymentByOrderId[order.id] ?? null,
+      })),
+    };
   })
   .get("/api/v1/account/prescriptions", async ({ request, query }) => {
     const session = await requireSession(request);
@@ -754,6 +780,29 @@ export const v1Api = new Elysia()
       input.fulfillmentMethod,
       input.idempotencyKey,
     );
+  })
+  .post("/api/v1/orders/:id/prescription", async ({ params, request }) => {
+    const session = await requireSession(request);
+    requireRole(session, ["CUSTOMER"]);
+    assertSessionCsrf(request, session.csrfTokenHash);
+    const parsedParams = parseBody(MasterData.idParams, params);
+    const formData = await request.formData();
+    const file = formData.get("file");
+
+    if (!(file instanceof File)) {
+      throw new ValidationAppError("File resep wajib diunggah.");
+    }
+
+    const bytes = Buffer.from(await file.arrayBuffer());
+
+    return client.cart.submitPrescription(session.userId, {
+      bytes,
+      contentType: file.type || "application/octet-stream",
+      fileName: file.name || "resep",
+      orderId: parsedParams.id,
+      requestContext: getRequestContext(request),
+      sizeBytes: file.size,
+    });
   })
   .post("/api/v1/cashier/checkout", async ({ body, request }) => {
     const session = await requireSession(request);

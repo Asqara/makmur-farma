@@ -67,7 +67,7 @@ Jika SMTP tidak dikonfigurasi di development, aplikasi menulis preview URL verif
 
 ## Object Storage
 
-Variable R2 masih tersedia untuk modul upload berikutnya:
+Cloudflare R2 digunakan sebagai object storage S3-compatible untuk file privat seperti export laporan PDF. Jika variable belum lengkap di local demo, aplikasi fallback ke `.makmur-storage`.
 
 ```text
 CLOUDFLARE_R2_ACCOUNT_ID
@@ -77,6 +77,8 @@ CLOUDFLARE_R2_BUCKET
 CLOUDFLARE_R2_PUBLIC_URL
 CLOUDFLARE_R2_ENDPOINT
 ```
+
+`CLOUDFLARE_R2_ENDPOINT` dapat diisi endpoint S3-compatible R2, misalnya `https://<account-id>.r2.cloudflarestorage.com`. Jika kosong, aplikasi membentuk endpoint dari `CLOUDFLARE_R2_ACCOUNT_ID`.
 
 ## Modul 2-5
 

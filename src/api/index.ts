@@ -71,7 +71,12 @@ export const app = new Elysia()
         staticFile: true,
       },
       path: "/api/v1/docs",
-      provider: "swagger-ui",
+      provider: "scalar",
+      // Override spec URL to absolute path — the library strips the leading "/"
+      // producing a relative URL that resolves incorrectly in the browser.
+      scalar: {
+        url: "/api/v1/docs/json",
+      },
       specPath: "/api/v1/docs/json",
     }),
   )

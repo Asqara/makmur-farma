@@ -1,16 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ShoppingCart, X } from "lucide-react";
-import Link from "next/link";
+import { ChevronDown, X } from "lucide-react";
 import { useState } from "react";
 
 import {
   Badge,
-  BrandLogo,
   Button,
   ButtonLink,
   Card,
+  CustomerNavbar,
   EmptyState,
   ErrorState,
   Pagination,
@@ -108,6 +107,7 @@ export default function CatalogPage() {
   const debouncedSearch = useDebounce(search.trim(), 300);
   const cart = useCart();
   const [addingId, setAddingId] = useState<string | null>(null);
+  const [addedId, setAddedId] = useState<string | null>(null);
 
   function updateFilter<T>(setter: (val: T) => void) {
     return (val: T) => {
@@ -127,6 +127,11 @@ export default function CatalogPage() {
         quantity: 1,
         unit: medicine.unit,
       });
+      setAddedId(medicine.id);
+      setTimeout(
+        () => setAddedId((prev) => (prev === medicine.id ? null : prev)),
+        1500,
+      );
     } finally {
       setAddingId(null);
     }
@@ -195,28 +200,9 @@ export default function CatalogPage() {
   }
 
   return (
-    <main className="min-h-screen bg-page-background">
-      <header className="border-b border-border-default bg-card-surface">
-        <section className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-6">
-          <BrandLogo />
-          <nav className="flex items-center gap-2">
-            <Link
-              className="ts-sm rounded-lg px-3 py-2 text-text-default hover:bg-muted-surface"
-              href={ROUTES.ACCOUNT}
-            >
-              Akun
-            </Link>
-            <ButtonLink
-              href="/cart"
-              leftIcon={<ShoppingCart aria-hidden="true" className="size-4" />}
-              size="sm"
-            >
-              Keranjang
-            </ButtonLink>
-          </nav>
-        </section>
-      </header>
-
+    <>
+      <CustomerNavbar />
+      <main className="min-h-screen bg-page-background">
       <section className="mx-auto grid max-w-7xl gap-6 px-4 py-6 md:px-6">
         {/* ── Filter bar ─────────────────────────────────────────────── */}
         <section className="grid gap-4 rounded-xl border border-border-default bg-card-surface p-4">
@@ -417,16 +403,24 @@ export default function CatalogPage() {
 
                     <section className="grid gap-2">
                       <Button
+                        className={
+                          addedId === medicine.id
+                            ? "bg-success text-text-inverse hover:bg-success"
+                            : undefined
+                        }
                         disabled={
                           medicine.totalAvailable <= 0 ||
                           addingId === medicine.id
                         }
                         onClick={() => handleAddToCart(medicine)}
                         type="button"
+                        variant={addedId === medicine.id ? "primary" : "primary"}
                       >
                         {addingId === medicine.id
                           ? "Menambahkan..."
-                          : "Tambah ke Keranjang"}
+                          : addedId === medicine.id
+                            ? "Ditambahkan ✓"
+                            : "Tambah ke Keranjang"}
                       </Button>
                       <ButtonLink
                         href={ROUTES.CATALOG.DETAIL(medicine.slug)}
@@ -465,5 +459,6 @@ export default function CatalogPage() {
         )}
       </section>
     </main>
+    </>
   );
 }

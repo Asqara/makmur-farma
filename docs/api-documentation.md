@@ -474,6 +474,14 @@ Decision values: `APPROVED`, `REJECTED`, `NEEDS_REVISION`.
 
 The original prescription file is not modified. The endpoint writes `prescription_reviews`, updates prescription status, writes audit log, sends customer notification, and advances order status only through a valid transition.
 
+### `POST /api/v1/orders/:id/prescription`
+
+Role: `CUSTOMER`.
+
+Requires `x-csrf-token` and multipart form data with field `file`.
+
+Uploads a prescription document for the authenticated customer's prescription-required order. Allowed files are PDF, JPG, and PNG up to 5 MB. The file is stored as a private object in Cloudflare R2 when configured, and the database stores immutable metadata plus the private object key. Uploading moves an eligible order from `AWAITING_PRESCRIPTION` to `PRESCRIPTION_REVIEW`.
+
 ### `POST /api/v1/notifications/read-all`
 
 Permission: `notification.read`.
@@ -510,7 +518,7 @@ Creates a queued report record for background generation.
 
 Permission: `report.read`.
 
-Downloads the generated PDF when the report run is completed.
+Downloads the generated PDF when the report run is completed. The file is stored in private object storage, using Cloudflare R2 when configured.
 
 ### `GET /api/v1/inventory/stock-sync`
 

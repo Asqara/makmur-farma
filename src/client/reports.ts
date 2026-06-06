@@ -1,8 +1,5 @@
 import "server-only";
 
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
 import { desc, eq } from "drizzle-orm";
 
 import { AUDIT_ACTIONS, type UserRole } from "@/constants/auth";
@@ -13,6 +10,7 @@ import {
   createQueue,
   type QueueJobEnvelope,
 } from "@/lib/queue";
+import { getPrivateObject } from "@/lib/object-storage";
 import type { RequestContext } from "@/lib/request";
 import { NotFoundAppError, ValidationAppError } from "@/lib/errors";
 
@@ -45,8 +43,6 @@ export type RequestReportInput = {
   type: string;
   filters: Record<string, unknown>;
 };
-
-const PRIVATE_STORAGE_ROOT = path.join(process.cwd(), ".makmur-storage");
 
 /**
  * Report history and background report request service.
@@ -160,7 +156,7 @@ export class ReportsClient {
     };
 
     await queue.add("REPORT_GENERATION", payload, {
-      jobId: jobRun.jobKey,
+      jobId: jobRun.id,
     });
 
     return report;
@@ -185,10 +181,11 @@ export class ReportsClient {
       throw new ValidationAppError("File laporan belum tersedia.");
     }
 
-    const bytes = await readFile(path.join(PRIVATE_STORAGE_ROOT, report.fileObjectKey));
+    const file = await getPrivateObject(report.fileObjectKey);
 
     return {
-      bytes,
+      bytes: file.bytes,
+      contentType: file.contentType,
       filename: report.filename ?? `laporan-${id}.pdf`,
     };
   }

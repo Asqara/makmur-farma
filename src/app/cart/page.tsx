@@ -1,20 +1,17 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Minus, Plus, ShoppingCart, Trash2 } from "lucide-react";
-import Link from "next/link";
+import { Minus, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import {
-  BrandLogo,
   Button,
   ButtonLink,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
+  CustomerNavbar,
   EmptyState,
-  ErrorState,
   Skeleton,
 } from "@/components/ui";
 import { ROUTES } from "@/constants/routes";
@@ -46,21 +43,9 @@ export default function CartPage() {
   };
 
   return (
-    <main className="min-h-screen bg-page-background">
-      <header className="border-b border-border-default bg-card-surface">
-        <section className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-6">
-          <BrandLogo />
-          <nav className="flex items-center gap-2">
-            <Link
-              className="ts-sm rounded-lg px-3 py-2 text-text-default hover:bg-muted-surface"
-              href={cart.isAuthenticated ? ROUTES.ACCOUNT : ROUTES.LOGIN}
-            >
-              {cart.isAuthenticated ? "Akun" : "Masuk"}
-            </Link>
-          </nav>
-        </section>
-      </header>
-
+    <>
+      <CustomerNavbar />
+      <main className="min-h-screen bg-page-background">
       <section className="mx-auto max-w-5xl px-4 py-6 md:px-6">
         <h1 className="ts-xl mb-6 font-bold text-text-strong">Keranjang Belanja</h1>
 
@@ -220,5 +205,6 @@ export default function CartPage() {
         )}
       </section>
     </main>
+    </>
   );
 }

@@ -37,6 +37,16 @@ export const ENV = {
     process.env.DATABASE_URL ??
     "postgres://user:pass@localhost:5432/makmur_farma",
   redisUrl: process.env.REDIS_URL,
+  objectStorage: {
+    r2: {
+      accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
+      accountId: process.env.CLOUDFLARE_R2_ACCOUNT_ID,
+      bucket: process.env.CLOUDFLARE_R2_BUCKET,
+      endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
+      publicUrl: process.env.CLOUDFLARE_R2_PUBLIC_URL,
+      secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+    },
+  },
   smtp: {
     fromEmail:
       process.env.SMTP_FROM_EMAIL ??

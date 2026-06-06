@@ -48,6 +48,7 @@ export const ROUTES = {
 
   // Customer
   ACCOUNT: "/account",
+  CART: "/cart",
   CATALOG: {
     DETAIL: (slug: string) => `/catalog/${slug}`,
     INDEX: "/catalog",

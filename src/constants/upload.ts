@@ -40,6 +40,17 @@ export const PRODUCT_IMAGE_ALLOWED_EXTENSIONS = [
 ] as const;
 
 /**
+ * File types allowed for customer prescription uploads.
+ */
+export const PRESCRIPTION_FILE_ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+] as const;
+
+export const PRESCRIPTION_FILE_LIMIT_BYTES = 5 * 1024 * 1024;
+
+/**
  * Cloudflare R2 environment keys for product image storage.
  */
 export const CLOUDFLARE_R2_ENV_KEYS = {

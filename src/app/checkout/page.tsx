@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, Loader2, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -20,7 +20,10 @@ import {
   Skeleton,
 } from "@/components/ui";
 import { ROUTES } from "@/constants/routes";
+import { CSRF_HEADER_NAME } from "@/constants/auth";
+import { CSRF_COOKIE_NAME } from "@/constants/cookies";
 import { eden } from "@/lib/eden";
+import { parseCookieHeader } from "@/utils/cookies";
 import { formatRp } from "@/utils/formatRp";
 
 type CartItem = {
@@ -84,6 +87,8 @@ export default function CheckoutPage() {
   const [idempotencyKey] = useState(generateIdempotencyKey);
   const [result, setResult] = useState<CheckoutResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [prescriptionFile, setPrescriptionFile] = useState<File | null>(null);
+  const [prescriptionUploaded, setPrescriptionUploaded] = useState(false);
 
   const cartQuery = useQuery({
     queryFn: async () => {
@@ -119,6 +124,44 @@ export default function CheckoutPage() {
     },
     onSuccess: (data) => {
       setResult(data);
+      setErrorMessage(null);
+    },
+  });
+
+  const prescriptionUploadMutation = useMutation({
+    mutationFn: async () => {
+      if (!result || !prescriptionFile) {
+        throw new Error("Pilih file resep terlebih dahulu.");
+      }
+
+      const csrfToken = parseCookieHeader(document.cookie)[CSRF_COOKIE_NAME];
+      const formData = new FormData();
+      formData.append("file", prescriptionFile);
+
+      const response = await fetch(
+        `/api/v1/orders/${result.order.id}/prescription`,
+        {
+          body: formData,
+          credentials: "include",
+          headers: csrfToken ? { [CSRF_HEADER_NAME]: csrfToken } : undefined,
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(payload?.message ?? "Upload resep gagal.");
+      }
+
+      return response.json();
+    },
+    onError: (error: Error) => {
+      setErrorMessage(error.message);
+    },
+    onSuccess: () => {
+      setPrescriptionUploaded(true);
       setErrorMessage(null);
     },
   });
@@ -180,14 +223,66 @@ export default function CheckoutPage() {
               </section>
               {result.order.prescriptionRequired ? (
                 <p className="ts-xs text-warning">
-                  Pesanan ini memerlukan verifikasi resep oleh apoteker sebelum diproses.
+                  Pesanan ini memerlukan upload dan verifikasi resep sebelum
+                  pembayaran diproses dan obat dapat diambil.
                 </p>
               ) : null}
             </CardContent>
           </Card>
 
+          {result.order.prescriptionRequired ? (
+            <Card className="w-full text-left">
+              <CardContent className="grid gap-3 py-4">
+                <section className="grid gap-1">
+                  <h2 className="ts-sm font-semibold text-text-strong">
+                    Upload Resep Dokter
+                  </h2>
+                  <p className="ts-xs text-text-muted">
+                    Gunakan PDF, JPG, atau PNG yang jelas. Maksimal 5 MB.
+                  </p>
+                </section>
+                {prescriptionUploaded ? (
+                  <p className="rounded-lg border border-success-border bg-success-bg px-3 py-2 ts-sm text-success">
+                    Resep berhasil diunggah dan menunggu verifikasi apoteker.
+                  </p>
+                ) : (
+                  <>
+                    <input
+                      accept="application/pdf,image/jpeg,image/png"
+                      className="ts-sm rounded-lg border border-border-default bg-card-surface px-3 py-2 text-text-default"
+                      onChange={(event) =>
+                        setPrescriptionFile(event.target.files?.[0] ?? null)
+                      }
+                      type="file"
+                    />
+                    <Button
+                      disabled={
+                        !prescriptionFile || prescriptionUploadMutation.isPending
+                      }
+                      leftIcon={
+                        prescriptionUploadMutation.isPending ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <UploadCloud />
+                        )
+                      }
+                      onClick={() => prescriptionUploadMutation.mutate()}
+                      type="button"
+                    >
+                      {prescriptionUploadMutation.isPending
+                        ? "Mengunggah..."
+                        : "Upload Resep"}
+                    </Button>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+
           <section className="flex w-full flex-col gap-3">
-            {result.payment.method === "QRIS" && result.payment.status === "PENDING" ? (
+            {result.payment.method === "QRIS" &&
+            result.payment.status === "PENDING" &&
+            !result.order.prescriptionRequired ? (
               <ButtonLink href={`/checkout/${result.payment.id}/qris`} variant="primary">
                 Bayar Sekarang (QRIS)
               </ButtonLink>
