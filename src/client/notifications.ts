@@ -55,6 +55,14 @@ type InventoryAlertScanResult = {
 const INVENTORY_ALERT_ROLES: readonly UserRole[] = ["ADMIN", "PHARMACIST"];
 const MS_PER_DAY = 24 * 60 * 60 * 1_000;
 
+function reminderDateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function canReceiveInventoryAlerts(role: UserRole) {
+  return INVENTORY_ALERT_ROLES.includes(role);
+}
+
 function audienceCondition(audience: NotificationAudience) {
   return or(
     eq(notifications.userId, audience.userId),
@@ -70,6 +78,8 @@ export class NotificationsClient {
     searchParams: Record<string, unknown>,
     audience: NotificationAudience,
   ): Promise<ListResponse<NotificationListItem>> {
+    await this.ensureInventoryReminderAlerts(audience);
+
     const filters = getListFilters(searchParams);
     const audienceSql = audienceCondition(audience);
     const conditions: SQL<unknown>[] = audienceSql ? [audienceSql] : [];
@@ -130,6 +140,8 @@ export class NotificationsClient {
   }
 
   async getUnreadCount(audience: NotificationAudience): Promise<number> {
+    await this.ensureInventoryReminderAlerts(audience);
+
     const [row] = await readDb
       .select({ total: countSql() })
       .from(notifications)
@@ -239,6 +251,7 @@ export class NotificationsClient {
   }
 
   private async createLowStockAlerts(now: Date) {
+    const dateKey = reminderDateKey(now);
     const rows = await readDb
       .select({
         availableQuantity: sql<number>`coalesce((
@@ -275,7 +288,7 @@ export class NotificationsClient {
           .insert(notifications)
           .values({
             actionHref: `/medicines`,
-            dedupeKey: `low-stock:${row.id}:${role}`,
+            dedupeKey: `low-stock:${row.id}:${role}:${dateKey}`,
             message: `${row.name} tersisa ${availableQuantity} ${row.unit}.`,
             roleTarget: role,
             severity,
@@ -294,6 +307,7 @@ export class NotificationsClient {
   }
 
   private async createExpiryAlerts(now: Date, windows: Array<"30" | "60" | "90">) {
+    const dateKey = reminderDateKey(now);
     const maxWindow = Math.max(...windows.map((window) => Number(window)));
     const maxDate = new Date(now.getTime() + maxWindow * MS_PER_DAY);
     const sortedWindows = windows
@@ -334,7 +348,7 @@ export class NotificationsClient {
           .insert(notifications)
           .values({
             actionHref: `/batches`,
-            dedupeKey: `expiry:${row.id}:${window}:${role}`,
+            dedupeKey: `expiry:${row.id}:${window}:${role}:${dateKey}`,
             message: `Batch ${row.batchNumber} untuk ${row.medicineName} kedaluwarsa dalam ${daysUntilExpiry} hari.`,
             roleTarget: role,
             severity,
@@ -350,5 +364,13 @@ export class NotificationsClient {
     }
 
     return created;
+  }
+
+  private async ensureInventoryReminderAlerts(audience: NotificationAudience) {
+    if (!canReceiveInventoryAlerts(audience.role)) return;
+
+    const now = new Date();
+    await this.createLowStockAlerts(now);
+    await this.createExpiryAlerts(now, ["30", "60", "90"]);
   }
 }

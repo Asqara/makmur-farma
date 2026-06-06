@@ -21,8 +21,8 @@ import { eden } from "@/lib/eden";
 import { formatRp } from "@/utils/formatRp";
 
 /**
- * QRIS Payment Simulator page (Phase 8).
- * Shows the QR code (simulated) and allows simulating success/failure callbacks.
+ * QRIS payment page for the customer demo flow.
+ * Shows the simulated QR code and lets the customer confirm payment success.
  */
 export default function QrisSimulatorPage() {
   const params = useParams();
@@ -128,29 +128,20 @@ export default function QrisSimulatorPage() {
 
                 {payment?.payment.status === "PENDING" && (
                   <section className="grid gap-3">
-                    <p className="ts-xs text-center font-medium text-text-disabled uppercase tracking-wider">Simulasi Action</p>
-                    <section className="grid grid-cols-2 gap-2">
-                      <Button
-                        disabled={simulateMutation.isPending}
-                        onClick={() => simulateMutation.mutate("PAID")}
-                        variant="primary"
-                      >
-                        Bayar (Berhasil)
-                      </Button>
-                      <Button
-                        disabled={simulateMutation.isPending}
-                        onClick={() => simulateMutation.mutate("FAILED")}
-                        variant="danger"
-                      >
-                        Gagal
-                      </Button>
-                    </section>
+                    <p className="ts-xs text-center font-medium text-text-muted">
+                      Demo pembayaran QRIS. Klik tombol setelah Anda memindai QR.
+                    </p>
                     <Button
                       disabled={simulateMutation.isPending}
-                      onClick={() => simulateMutation.mutate("EXPIRED")}
-                      variant="secondary"
+                      leftIcon={
+                        simulateMutation.isPending ? (
+                          <Loader2 className="animate-spin" />
+                        ) : undefined
+                      }
+                      onClick={() => simulateMutation.mutate("PAID")}
+                      variant="primary"
                     >
-                      Kedaluwarsa
+                      Konfirmasi Pembayaran
                     </Button>
                   </section>
                 )}

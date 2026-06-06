@@ -15,6 +15,7 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  Pagination,
   SelectInput,
   StatusBadge,
   TableBody,
@@ -50,13 +51,21 @@ type PaymentRow = {
 
 type PaymentsResponse = {
   data: PaymentRow[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+
+const PAGE_SIZE = 30;
 
 export default function PaymentsPage() {
   const queryClient = useQueryClient();
   const auth = useAuth();
   const isAdmin = auth.data?.user.role === "ADMIN";
 
+  const [page, setPage] = useState(1);
   const [overridePayment, setOverridePayment] = useState<PaymentRow | null>(null);
   const [overrideStatus, setOverrideStatus] = useState<"PAID" | "CANCELLED" | "REFUNDED">("PAID");
   const [overrideReason, setOverrideReason] = useState("");
@@ -64,14 +73,19 @@ export default function PaymentsPage() {
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.payments.get({
-        query: { limit: "30", page: "1", sortBy: "createdAt", sortDir: "desc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "createdAt",
+          sortDir: "desc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as PaymentsResponse;
     },
-    queryKey: ["payments"],
+    queryKey: ["payments", page],
   });
 
   const overrideMutation = useMutation({
@@ -100,6 +114,20 @@ export default function PaymentsPage() {
   return (
     <DataTableShell
       description="Status pembayaran dipisahkan dari status pesanan dan tidak dipercaya dari redirect frontend."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} pembayaran ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Pembayaran"
     >
       {query.isError ? (

@@ -81,10 +81,10 @@ export const STATUS_TONE_CLASS_NAMES: Record<StatusTone, string> = {
  * live inside modal content.
  */
 export const OVERLAY_Z_INDEX_CLASS_NAMES = {
-  mobileDrawer: "z-[900]",
-  dialogBackdrop: "z-[1000]",
-  popover: "z-[1100]",
-  toast: "z-[1200]",
+  mobileDrawer: "z-[9999]",
+  dialogBackdrop: "z-[9999]",
+  popover: "z-[9999]",
+  toast: "z-[9999]",
 } as const;
 
 // ---------------------------------------------------------------------------

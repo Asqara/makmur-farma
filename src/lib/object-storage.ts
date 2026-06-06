@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { AwsClient } from "aws4fetch";
@@ -89,6 +89,23 @@ async function getLocalObject(key: string): Promise<StoredObject> {
   };
 }
 
+async function deleteLocalObject(key: string) {
+  try {
+    await unlink(path.join(PRIVATE_STORAGE_ROOT, normalizeObjectKey(key)));
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "ENOENT"
+    ) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 /**
  * Stores a private object in Cloudflare R2 when configured, with local fallback
  * for assessment/demo environments that do not have object storage credentials.
@@ -152,4 +169,29 @@ export async function getPrivateObject(key: string): Promise<StoredObject> {
     contentType:
       response.headers.get("Content-Type") ?? "application/octet-stream",
   };
+}
+
+/**
+ * Deletes a private object from Cloudflare R2 when configured, or from local
+ * demo storage. Missing objects are treated as already deleted.
+ */
+export async function deletePrivateObject(key: string) {
+  const config = getR2Config();
+
+  if (!config) {
+    await deleteLocalObject(key);
+    return { provider: "local" as const };
+  }
+
+  const client = getR2Client(config);
+  const response = await client.fetch(
+    buildObjectUrl(config.endpoint, config.bucket, key),
+    { method: "DELETE" },
+  );
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`Hapus R2 gagal: ${response.status}`);
+  }
+
+  return { provider: "r2" as const };
 }

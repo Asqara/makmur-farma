@@ -24,6 +24,7 @@ import {
   EmptyState,
   ErrorState,
   OrderStatusBadge,
+  Pagination,
   TableBody,
   TableCell,
   TableHead,
@@ -63,6 +64,11 @@ type OrdersResponse = {
     prescriptionRequired: boolean;
     status: OrderStatus;
   }>;
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 const TRANSITION_ACTION_LABELS: Partial<Record<OrderStatus, string>> = {
@@ -100,6 +106,7 @@ const TRANSITION_DESCRIPTIONS: Partial<Record<OrderStatus, string>> = {
   READY_FOR_PICKUP: "Pesanan akan ditandai siap diambil oleh pelanggan.",
   SHIPPED: "Pesanan akan ditandai telah dikirim.",
 };
+const PAGE_SIZE = 30;
 
 /**
  * Returns only the transition targets that are exposed as manual UI actions.
@@ -112,19 +119,25 @@ function getManualTransitions(status: OrderStatus): OrderStatus[] {
 
 export default function OrdersPage() {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
   const [target, setTarget] = useState<TransitionTarget>(null);
 
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.orders.get({
-        query: { limit: "30", page: "1", sortBy: "createdAt", sortDir: "desc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "createdAt",
+          sortDir: "desc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as OrdersResponse;
     },
-    queryKey: ["orders"],
+    queryKey: ["orders", page],
   });
 
   const transitionMutation = useMutation({
@@ -168,6 +181,20 @@ export default function OrdersPage() {
   return (
     <DataTableShell
       description="Pesanan online dan kasir memakai workflow dan stok yang sama."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} pesanan ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Pesanan"
     >
       {query.isError ? (

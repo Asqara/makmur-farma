@@ -15,6 +15,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Pagination,
   StatusBadge,
   TableBody,
   TableCell,
@@ -42,7 +43,13 @@ type SupplierRow = {
 
 type SupplierResponse = {
   data: SupplierRow[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+const PAGE_SIZE = 50;
 
 type SupplierDialogState =
   | { mode: "create" }
@@ -69,6 +76,7 @@ export default function SuppliersPage() {
 
   const [dialog, setDialog] = useState<SupplierDialogState>(null);
   const [toggleDialog, setToggleDialog] = useState<ToggleDialogState>(null);
+  const [page, setPage] = useState(1);
 
   // Form state
   const [code, setCode] = useState("");
@@ -82,14 +90,19 @@ export default function SuppliersPage() {
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.suppliers.get({
-        query: { limit: "100", page: "1", sortBy: "name", sortDir: "asc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "name",
+          sortDir: "asc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as SupplierResponse;
     },
-    queryKey: ["suppliers"],
+    queryKey: ["suppliers", page],
   });
 
   const createMutation = useMutation({
@@ -211,6 +224,20 @@ export default function SuppliersPage() {
     <>
       <DataTableShell
         description="Supplier digunakan pada batch penerimaan stok dan audit riwayat pengadaan."
+        footer={
+          query.data?.pagination ? (
+            <section className="flex flex-wrap items-center justify-between gap-3">
+              <p className="ts-sm text-text-muted">
+                {query.data.pagination.total} supplier ditemukan
+              </p>
+              <Pagination
+                currentPage={page}
+                onPageChange={setPage}
+                pageCount={Math.max(query.data.pagination.totalPages, 1)}
+              />
+            </section>
+          ) : null
+        }
         title="Supplier"
         toolbar={
           <Button leftIcon={<Plus />} onClick={openCreate} size="sm">

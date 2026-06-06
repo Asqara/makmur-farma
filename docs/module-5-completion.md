@@ -14,7 +14,7 @@ Status ini mencatat hasil audit dan perbaikan yang sudah diverifikasi selama pen
 ## Audit
 
 - [x] Read all project documentation: `AGENTS.md`, `DESIGN.md`, `README.md`, and current docs under `docs/`.
-- [x] Audit queue and worker: BullMQ wrapper exists in `src/lib/queue.ts`; worker exists in `src/worker.ts`; report/import processors now perform business effects.
+- [x] Audit queue and worker: BullMQ wrapper exists in `src/lib/queue.ts`; worker exists in `src/worker.ts`; import processors perform business effects, while report PDF now completes inline and renders in memory on download.
 - [x] Audit orders: online cart/checkout and cashier checkout use shared batch stock workflow; concurrency behavior still needs integration tests against PostgreSQL.
 - [x] Audit payments: QRIS simulator, payment override, payment expiry scan, and stock reservation release/finalization are implemented for the demo provider.
 - [x] Audit inventory synchronization: stock is PostgreSQL-backed and movement-based; dashboard shell now polls a stock watermark and refreshes stock-sensitive queries.
@@ -31,10 +31,10 @@ Status ini mencatat hasil audit dan perbaikan yang sudah diverifikasi selama pen
 
 ## Module 5
 
-- [x] Queue infrastructure: BullMQ queues exist; report/import requests now create `job_runs` and enqueue jobs.
+- [x] Queue infrastructure: BullMQ queues exist; import requests create `job_runs` and enqueue jobs. Report requests create job metadata but do not depend on Redis/worker for PDF availability.
 - [x] Worker process: `pnpm worker` exists and consumes queues; report/import handlers and maintenance scans are implemented.
 - [x] Typed job payloads: `QueueJobEnvelope` added with safe small fields.
-- [x] Job idempotency: report/import jobs use deterministic BullMQ `jobId` values based on persisted `job_runs.jobKey`.
+- [x] Job idempotency: import jobs use deterministic BullMQ `jobId` values based on persisted `job_runs.jobKey`; report runs are idempotent through persisted report metadata and in-memory PDF rendering.
 - [x] Retry and backoff: queue defaults use bounded attempts and exponential backoff.
 - [~] Parallel order handling: shared inventory/order services exist; focused PostgreSQL concurrency tests are not complete.
 - [x] Payment jobs: worker maintenance scan expires overdue demo payments and records payment events.

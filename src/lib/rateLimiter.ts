@@ -37,8 +37,10 @@ type RateLimiterConfig = {
 export class RateLimiter {
   private static redis = ENV.redisUrl
     ? new Redis(ENV.redisUrl, {
+        connectTimeout: 2000,
+        enableOfflineQueue: false,
         lazyConnect: true,
-        maxRetriesPerRequest: 1,
+        maxRetriesPerRequest: 0,
       })
     : null;
 

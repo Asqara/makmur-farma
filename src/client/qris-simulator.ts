@@ -53,6 +53,11 @@ export type SimulatorStatusResult = {
   };
 };
 
+type PaymentViewer = {
+  role: UserRole;
+  userId: string;
+};
+
 /**
  * QRIS payment simulation service.
  * Used only when ENABLE_PAYMENT_SIMULATOR=true (development/demo environments).
@@ -66,11 +71,13 @@ export class QrisSimulatorClient {
   async initializeQrisPayment(
     paymentId: string,
     amount: string,
+    viewer?: PaymentViewer,
   ): Promise<InitializeQrisResult> {
     const [payment] = await readDb
       .select({
         id: payments.id,
         method: payments.method,
+        orderCustomerUserId: orders.customerUserId,
         orderPrescriptionRequired: orders.prescriptionRequired,
         orderStatus: orders.status,
         provider: payments.provider,
@@ -84,6 +91,13 @@ export class QrisSimulatorClient {
 
     if (!payment) {
       throw new NotFoundAppError("Pembayaran tidak ditemukan.");
+    }
+
+    if (
+      viewer?.role === "CUSTOMER" &&
+      payment.orderCustomerUserId !== viewer.userId
+    ) {
+      throw new ForbiddenError("Pembayaran ini bukan milik akun Anda.");
     }
 
     if (payment.method !== "QRIS") {
@@ -196,6 +210,16 @@ export class QrisSimulatorClient {
 
     if (!order) {
       throw new NotFoundAppError("Pesanan tidak ditemukan.");
+    }
+
+    if (actor.actorRole === "CUSTOMER") {
+      if (order.customerUserId !== actor.actorUserId) {
+        throw new ForbiddenError("Pembayaran ini bukan milik akun Anda.");
+      }
+
+      if (outcome !== "PAID") {
+        throw new ForbiddenError("Pelanggan hanya dapat mengonfirmasi pembayaran berhasil.");
+      }
     }
 
     const newPaymentStatus: PaymentStatus =
@@ -348,11 +372,15 @@ export class QrisSimulatorClient {
   /**
    * Return the current payment record and latest event for simulator display.
    */
-  async getSimulatorStatus(paymentId: string): Promise<SimulatorStatusResult> {
+  async getSimulatorStatus(
+    paymentId: string,
+    viewer?: PaymentViewer,
+  ): Promise<SimulatorStatusResult> {
     const [row] = await readDb
       .select({
         amount: payments.amount,
         createdAt: payments.createdAt,
+        customerUserId: orders.customerUserId,
         expiresAt: payments.expiresAt,
         id: payments.id,
         method: payments.method,
@@ -371,6 +399,10 @@ export class QrisSimulatorClient {
 
     if (!row) {
       throw new NotFoundAppError("Pembayaran tidak ditemukan.");
+    }
+
+    if (viewer?.role === "CUSTOMER" && row.customerUserId !== viewer.userId) {
+      throw new ForbiddenError("Pembayaran ini bukan milik akun Anda.");
     }
 
     const [latestEvent] = await readDb
@@ -408,7 +440,7 @@ export class QrisSimulatorClient {
   /**
    * Return a payment record with its full event timeline.
    */
-  async getPaymentDetail(paymentId: string): Promise<{
+  async getPaymentDetail(paymentId: string, viewer?: PaymentViewer): Promise<{
     events: Array<{
       eventType: string;
       id: string;
@@ -419,7 +451,7 @@ export class QrisSimulatorClient {
     }>;
     payment: SimulatorStatusResult["payment"];
   }> {
-    const { payment } = await this.getSimulatorStatus(paymentId);
+    const { payment } = await this.getSimulatorStatus(paymentId, viewer);
 
     const events = await readDb
       .select({

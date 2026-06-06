@@ -14,6 +14,7 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  Pagination,
   SelectInput,
   StatusBadge,
   TableBody,
@@ -51,7 +52,13 @@ type UserRow = {
 
 type UsersResponse = {
   data: UserRow[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+const PAGE_SIZE = 30;
 
 const roleOptions: SelectInputOption[] = USER_ROLE_VALUES.map((role) => ({
   label: USER_ROLE_LABELS[role],
@@ -83,14 +90,15 @@ export default function UsersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search.trim(), 300);
+  const [page, setPage] = useState(1);
   const [form, setForm] = useState(initialForm);
 
   const usersQuery = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.users.get({
         query: {
-          limit: "30",
-          page: "1",
+          limit: String(PAGE_SIZE),
+          page: String(page),
           search: debouncedSearch,
           sortBy: "createdAt",
           sortDir: "desc",
@@ -101,7 +109,7 @@ export default function UsersPage() {
 
       return response.data as UsersResponse;
     },
-    queryKey: ["users", debouncedSearch],
+    queryKey: ["users", debouncedSearch, page],
   });
 
   const createMutation = useMutation({
@@ -159,13 +167,30 @@ export default function UsersPage() {
   return (
     <DataTableShell
       description="Admin dapat membuat pengguna operasional, mengubah role/status, dan menonaktifkan akses."
+      footer={
+        usersQuery.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {usersQuery.data.pagination.total} pengguna ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(usersQuery.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Pengguna"
       toolbar={
         <section className="grid gap-3 md:grid-cols-[minmax(0,320px)_auto] md:items-end">
           <TextInput
             id="user-search"
             label="Cari Pengguna"
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
             placeholder="Cari nama, email, atau telepon"
             value={search}
           />

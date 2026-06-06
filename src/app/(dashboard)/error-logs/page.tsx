@@ -14,6 +14,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Pagination,
   SelectInput,
   StatusBadge,
   TableBody,
@@ -39,6 +40,11 @@ type ErrorLogRow = {
 
 type ErrorLogsResponse = {
   data: ErrorLogRow[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 type ErrorActionState = {
@@ -65,20 +71,22 @@ const STATUS_OPTIONS = [
   { label: "Terbuka", value: "false" },
   { label: "Selesai", value: "true" },
 ];
+const PAGE_SIZE = 30;
 
 export default function ErrorLogsPage() {
   const queryClient = useQueryClient();
 
   const [errorAction, setErrorAction] = useState<ErrorActionState>(null);
   const [note, setNote] = useState("");
+  const [page, setPage] = useState(1);
   const [severityFilter, setSeverityFilter] = useState("");
   const [resolvedFilter, setResolvedFilter] = useState("");
 
   const query = useQuery({
     queryFn: async () => {
       const queryParams: Record<string, string> = {
-        limit: "30",
-        page: "1",
+        limit: String(PAGE_SIZE),
+        page: String(page),
         sortBy: "createdAt",
         sortDir: "desc",
       };
@@ -94,7 +102,7 @@ export default function ErrorLogsPage() {
 
       return response.data as ErrorLogsResponse;
     },
-    queryKey: ["error-logs", severityFilter, resolvedFilter],
+    queryKey: ["error-logs", severityFilter, resolvedFilter, page],
   });
 
   const resolveMutation = useMutation({
@@ -147,20 +155,40 @@ export default function ErrorLogsPage() {
     <>
       <DataTableShell
         description="Error log menyimpan pesan aman dan detail diagnostik tetap dibatasi untuk role operasional."
+        footer={
+          query.data?.pagination ? (
+            <section className="flex flex-wrap items-center justify-between gap-3">
+              <p className="ts-sm text-text-muted">
+                {query.data.pagination.total} error ditemukan
+              </p>
+              <Pagination
+                currentPage={page}
+                onPageChange={setPage}
+                pageCount={Math.max(query.data.pagination.totalPages, 1)}
+              />
+            </section>
+          ) : null
+        }
         title="Error Log"
         toolbar={
           <>
             <SelectInput
               id="error-logs-severity"
               label="Severity"
-              onValueChange={(v) => setSeverityFilter(v)}
+              onValueChange={(v) => {
+                setSeverityFilter(v);
+                setPage(1);
+              }}
               options={SEVERITY_OPTIONS}
               value={severityFilter}
             />
             <SelectInput
               id="error-logs-status"
               label="Status"
-              onValueChange={(v) => setResolvedFilter(v)}
+              onValueChange={(v) => {
+                setResolvedFilter(v);
+                setPage(1);
+              }}
               options={STATUS_OPTIONS}
               value={resolvedFilter}
             />

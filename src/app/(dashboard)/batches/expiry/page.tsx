@@ -14,6 +14,7 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  Pagination,
   SelectInput,
   StatusBadge,
   TableBody,
@@ -133,6 +134,7 @@ export default function ExpiryMonitoringPage() {
   const [expiryWindow, setExpiryWindow] = useState<string>("30");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search.trim(), 300);
+  const [page, setPage] = useState(1);
 
   // Block dialog state
   const [blockTarget, setBlockTarget] = useState<BatchRow | null>(null);
@@ -144,7 +146,7 @@ export default function ExpiryMonitoringPage() {
       const queryParams: Record<string, string> = {
         expiryWindow,
         limit: String(PAGE_SIZE),
-        page: "1",
+        page: String(page),
         sortBy: "expiryDate",
         sortDir: "asc",
       };
@@ -157,7 +159,7 @@ export default function ExpiryMonitoringPage() {
 
       return response.data as BatchResponse;
     },
-    queryKey: ["batches-expiry", expiryWindow, debouncedSearch],
+    queryKey: ["batches-expiry", expiryWindow, debouncedSearch, page],
   });
 
   const blockMutation = useMutation({
@@ -219,6 +221,20 @@ export default function ExpiryMonitoringPage() {
     <>
       <DataTableShell
         description="Monitor batch yang akan atau sudah kedaluwarsa. Ambil tindakan sebelum stok tidak layak digunakan."
+        footer={
+          query.data?.pagination ? (
+            <section className="flex flex-wrap items-center justify-between gap-3">
+              <p className="ts-sm text-text-muted">
+                {query.data.pagination.total} batch ditemukan
+              </p>
+              <Pagination
+                currentPage={page}
+                onPageChange={setPage}
+                pageCount={Math.max(query.data.pagination.totalPages, 1)}
+              />
+            </section>
+          ) : null
+        }
         title="Monitor Kedaluwarsa"
         toolbar={
           <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -228,6 +244,7 @@ export default function ExpiryMonitoringPage() {
                 label="Rentang Waktu"
                 onValueChange={(v) => {
                   setExpiryWindow(v);
+                  setPage(1);
                 }}
                 options={EXPIRY_WINDOW_OPTIONS}
                 value={expiryWindow}
@@ -235,7 +252,10 @@ export default function ExpiryMonitoringPage() {
               <TextInput
                 id="expiry-search"
                 label="Cari Obat / Batch"
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Nama obat, kode, atau nomor batch..."
                 value={search}
               />

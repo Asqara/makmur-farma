@@ -1,12 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Pencil, Plus, PowerOff, Search } from "lucide-react";
+import { Eye, FileUp, Pencil, Plus, PowerOff, Search } from "lucide-react";
 import { useState } from "react";
 
 import {
   ActionMenu,
   Badge,
+  Button,
   ButtonLink,
   Card,
   CardContent,
@@ -15,6 +16,8 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  MedicineImportDialog,
+  Pagination,
   Skeleton,
   StatusBadge,
   TableBody,
@@ -55,7 +58,14 @@ type MedicineListItem = {
 
 type MedicineListResponse = {
   data: MedicineListItem[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+
+const PAGE_SIZE = 20;
 
 function stockTone(totalAvailable: number, low: number, critical: number) {
   if (totalAvailable <= 0) return "danger";
@@ -77,15 +87,17 @@ function stockLabel(totalAvailable: number, low: number, critical: number) {
 export default function MedicinesPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search.trim(), 300);
+  const [page, setPage] = useState(1);
   const [deactivateTarget, setDeactivateTarget] = useState<MedicineListItem | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const medicinesQuery = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.medicines.get({
         query: {
-          limit: "20",
-          page: "1",
+          limit: String(PAGE_SIZE),
+          page: String(page),
           search: debouncedSearch,
           sortBy: "name",
           sortDir: "asc",
@@ -96,7 +108,7 @@ export default function MedicinesPage() {
 
       return response.data as MedicineListResponse;
     },
-    queryKey: ["medicines", debouncedSearch],
+    queryKey: ["medicines", debouncedSearch, page],
   });
 
   const deactivateMutation = useMutation({
@@ -121,13 +133,30 @@ export default function MedicinesPage() {
     <>
       <DataTableShell
         description="Kelola master obat tanpa mengubah stok langsung. Stok berasal dari batch dan pergerakan stok."
+        footer={
+          medicinesQuery.data?.pagination ? (
+            <section className="flex flex-wrap items-center justify-between gap-3">
+              <p className="ts-sm text-text-muted">
+                {medicinesQuery.data.pagination.total} obat ditemukan
+              </p>
+              <Pagination
+                currentPage={page}
+                onPageChange={setPage}
+                pageCount={Math.max(medicinesQuery.data.pagination.totalPages, 1)}
+              />
+            </section>
+          ) : null
+        }
         title="Obat"
         toolbar={
           <section className="grid gap-3 md:grid-cols-[minmax(0,320px)_auto_auto] md:items-end">
             <TextInput
               id="medicine-search"
               label="Cari Obat"
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
               placeholder="Cari nama atau kode obat"
               value={search}
             />
@@ -135,7 +164,14 @@ export default function MedicinesPage() {
               <Search aria-hidden="true" className="size-4" />
               <span className="ts-sm"></span>
             </section>
-            <section className="flex min-h-10 items-end">
+            <section className="flex min-h-10 items-end gap-2">
+              <Button
+                leftIcon={<FileUp />}
+                onClick={() => setImportOpen(true)}
+                variant="secondary"
+              >
+                Import Excel
+              </Button>
               <ButtonLink
                 href={`${ROUTES.MEDICINES.INDEX}/new`}
                 leftIcon={<Plus />}
@@ -268,6 +304,15 @@ export default function MedicinesPage() {
         open={deactivateTarget !== null}
         title="Nonaktifkan Obat"
         variant="warning"
+      />
+
+      <MedicineImportDialog
+        onClose={() => setImportOpen(false)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["medicines"] });
+          toast.success("Import obat berhasil diantrekan.");
+        }}
+        open={importOpen}
       />
     </>
   );

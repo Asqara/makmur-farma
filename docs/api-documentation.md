@@ -443,11 +443,37 @@ Permission: `payment.read`.
 
 Returns payment records with order reference, provider, method, amount, and payment status.
 
+### `GET /api/v1/payments/:id`
+
+Operational permission: `payment.read`.
+
+Customer access: allowed for the authenticated customer that owns the payment's order.
+
+Returns payment detail and simulator event history.
+
+### `POST /api/v1/payments/:id/simulate`
+
+Operational role: `ADMIN` or `CASHIER`.
+
+Customer access: allowed only for confirming `PAID` on the authenticated customer's own payment in demo simulator mode.
+
 ### `GET /api/v1/prescriptions`
 
 Permission: `prescription.read`.
 
 Returns prescription metadata and review status. It does not expose public prescription document URLs.
+
+### `GET /api/v1/prescriptions/:id`
+
+Permission: `prescription.read`.
+
+Returns prescription detail, customer/order metadata, file metadata, and review history.
+
+### `GET /api/v1/prescriptions/:id/file`
+
+Permission: `prescription.read`.
+
+Streams the original private prescription file through an authenticated endpoint. The file is not exposed through a public object storage URL.
 
 ### `POST /api/v1/prescriptions/:id/review`
 
@@ -512,13 +538,13 @@ Permission: `report.generate`.
 
 Requires `x-csrf-token`.
 
-Creates a queued report record for background generation.
+Creates a report run, calculates report metadata, and marks it completed when the PDF can be downloaded. The PDF file itself is not stored permanently.
 
 ### `GET /api/v1/reports/:id/download`
 
 Permission: `report.read`.
 
-Downloads the generated PDF when the report run is completed. The file is stored in private object storage, using Cloudflare R2 when configured.
+Downloads the generated PDF when the report run is completed. The PDF is rendered in memory from the report filters and current authoritative database data, then streamed to the user without permanent file storage. If an older completed report still has a private object key, the object is deleted after the next download and only report metadata remains.
 
 ### `GET /api/v1/inventory/stock-sync`
 

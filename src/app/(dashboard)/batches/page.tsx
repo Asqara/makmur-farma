@@ -16,6 +16,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Pagination,
   SelectInput,
   StatusBadge,
   TableBody,
@@ -58,7 +59,13 @@ type BatchResponse = {
       name: string | null;
     };
   }>;
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+const PAGE_SIZE = 30;
 
 type MedicineOption = { id: string; name: string; code: string };
 type SupplierOption = { id: string; name: string };
@@ -99,6 +106,7 @@ export default function BatchesPage() {
   const queryClient = useQueryClient();
 
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [page, setPage] = useState(1);
   const [receiptForm, setReceiptForm] = useState<ReceiptForm>(EMPTY_RECEIPT);
   const [receiptErrors, setReceiptErrors] = useState<Partial<ReceiptForm>>({});
 
@@ -109,14 +117,19 @@ export default function BatchesPage() {
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.batches.get({
-        query: { limit: "30", page: "1", sortBy: "expiryDate", sortDir: "asc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "expiryDate",
+          sortDir: "asc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as BatchResponse;
     },
-    queryKey: ["batches"],
+    queryKey: ["batches", page],
   });
 
   const medicinesQuery = useQuery({
@@ -276,6 +289,20 @@ export default function BatchesPage() {
     <>
       <DataTableShell
         description="Stok operasional berasal dari batch dengan tanggal terima dan kedaluwarsa."
+        footer={
+          query.data?.pagination ? (
+            <section className="flex flex-wrap items-center justify-between gap-3">
+              <p className="ts-sm text-text-muted">
+                {query.data.pagination.total} batch ditemukan
+              </p>
+              <Pagination
+                currentPage={page}
+                onPageChange={setPage}
+                pageCount={Math.max(query.data.pagination.totalPages, 1)}
+              />
+            </section>
+          ) : null
+        }
         title="Batch dan Stok"
         toolbar={
           <section className="flex items-end justify-end gap-2">

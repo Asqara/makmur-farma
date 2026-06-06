@@ -6,6 +6,8 @@ import { notificationsApi } from "./notifications";
 import { v1Api } from "./v1";
 import { ENV } from "@/constants/config";
 import { AppError } from "@/lib/errors";
+import { client } from "@/client";
+import { getRequestContext } from "@/lib/request";
 
 function isPublicApiError(
   error: unknown,
@@ -80,9 +82,26 @@ export const app = new Elysia()
       specPath: "/api/v1/docs/json",
     }),
   )
-  .onError(({ error, set }) => {
+  .onError(async ({ error, request, set }) => {
+    const requestContext = getRequestContext(request);
+    const url = new URL(request.url);
+    const source = `${request.method} ${url.pathname}`;
+
     if (error instanceof AppError) {
       set.status = error.statusCode;
+      await client.jobs.recordSystemError({
+        correlationId: requestContext.correlationId,
+        diagnosticDetail:
+          error.statusCode >= 500 ? error.stack ?? error.message : null,
+        safeMessage: `${error.code}: ${error.publicMessage}`,
+        severity:
+          error.statusCode >= 500
+            ? "critical"
+            : error.statusCode >= 403
+              ? "warning"
+              : "info",
+        source,
+      });
 
       return {
         code: error.code,
@@ -92,6 +111,18 @@ export const app = new Elysia()
 
     if (isPublicApiError(error)) {
       set.status = error.statusCode;
+      await client.jobs.recordSystemError({
+        correlationId: requestContext.correlationId,
+        diagnosticDetail: error.statusCode >= 500 ? JSON.stringify(error) : null,
+        safeMessage: `${error.code}: ${error.publicMessage}`,
+        severity:
+          error.statusCode >= 500
+            ? "critical"
+            : error.statusCode >= 403
+              ? "warning"
+              : "info",
+        source,
+      });
 
       return {
         code: error.code,
@@ -101,6 +132,13 @@ export const app = new Elysia()
 
     console.error("Unhandled API error.", error);
     set.status = 500;
+    await client.jobs.recordSystemError({
+      correlationId: requestContext.correlationId,
+      diagnosticDetail: error instanceof Error ? error.stack ?? error.message : null,
+      safeMessage: "INTERNAL_SERVER_ERROR: Terjadi kesalahan pada server.",
+      severity: "critical",
+      source,
+    });
 
     return {
       code: "INTERNAL_SERVER_ERROR",

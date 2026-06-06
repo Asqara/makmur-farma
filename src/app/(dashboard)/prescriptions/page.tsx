@@ -15,6 +15,7 @@ import {
   EmptyState,
   ErrorState,
   OrderStatusBadge,
+  Pagination,
   SelectInput,
   StatusBadge,
   TableBody,
@@ -45,17 +46,6 @@ type ReviewTarget = {
   orderNumber: string;
 } | null;
 
-type InfoTarget = {
-  customerEmail: string | null;
-  customerName: string | null;
-  fileName: string;
-  id: string;
-  orderNumber: string;
-  orderStatus: OrderStatus;
-  prescriptionStatus: PrescriptionStatus;
-  submittedAt: Date | string;
-} | null;
-
 type PrescriptionsResponse = {
   data: Array<{
     customer: {
@@ -71,7 +61,14 @@ type PrescriptionsResponse = {
     status: PrescriptionStatus;
     submittedAt: Date | string;
   }>;
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+
+const PAGE_SIZE = 30;
 
 const DECISION_OPTIONS = [
   { label: "Disetujui", value: "APPROVED" as PrescriptionDecision },
@@ -88,20 +85,25 @@ function notesRequired(decision: PrescriptionDecision | ""): boolean {
 
 export default function PrescriptionsPage() {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget>(null);
-  const [infoTarget, setInfoTarget] = useState<InfoTarget>(null);
 
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.prescriptions.get({
-        query: { limit: "30", page: "1", sortBy: "submittedAt", sortDir: "desc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "submittedAt",
+          sortDir: "desc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as PrescriptionsResponse;
     },
-    queryKey: ["prescriptions"],
+    queryKey: ["prescriptions", page],
   });
 
   const reviewMutation = useMutation({
@@ -151,6 +153,20 @@ export default function PrescriptionsPage() {
   return (
     <DataTableShell
       description="File resep asli tetap immutable; keputusan apoteker disimpan terpisah."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} resep ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Resep"
     >
       {query.isError ? (
@@ -210,19 +226,9 @@ export default function PrescriptionsPage() {
                         <ActionMenu
                           items={[
                             {
+                              href: `/prescriptions/${prescription.id}`,
                               icon: <Eye />,
                               label: "Lihat Resep",
-                              onSelect: () =>
-                                setInfoTarget({
-                                  customerEmail: prescription.customer.email,
-                                  customerName: prescription.customer.name,
-                                  fileName: prescription.originalFileName,
-                                  id: prescription.id,
-                                  orderNumber: prescription.order.orderNumber,
-                                  orderStatus: prescription.order.status,
-                                  prescriptionStatus: prescription.status,
-                                  submittedAt: prescription.submittedAt,
-                                }),
                             },
                             {
                               disabled: !canReview,
@@ -263,82 +269,6 @@ export default function PrescriptionsPage() {
           title={query.isLoading ? "Memuat" : "Resep Kosong"}
         />
       )}
-
-      {/* Prescription info dialog */}
-      <Dialog
-        description="Informasi resep yang diunggah pelanggan."
-        footer={
-          <Button onClick={() => setInfoTarget(null)} variant="secondary">
-            Tutup
-          </Button>
-        }
-        id="prescription-info-dialog"
-        onClose={() => setInfoTarget(null)}
-        open={infoTarget !== null}
-        title="Detail Resep"
-      >
-        {infoTarget && (
-          <section className="grid gap-4">
-            <section className="grid gap-2">
-              <section>
-                <p className="ts-xs text-text-muted">ID Resep</p>
-                <p className="ts-sm font-mono text-text-strong">
-                  {infoTarget.id}
-                </p>
-              </section>
-              <section>
-                <p className="ts-xs text-text-muted">Nomor Pesanan</p>
-                <p className="ts-sm font-mono text-text-strong">
-                  {infoTarget.orderNumber}
-                </p>
-              </section>
-              <section>
-                <p className="ts-xs text-text-muted">Nama File</p>
-                <p className="ts-sm text-text-strong">{infoTarget.fileName}</p>
-              </section>
-              <section>
-                <p className="ts-xs text-text-muted">Pelanggan</p>
-                <p className="ts-sm text-text-strong">
-                  {infoTarget.customerName ?? "Pelanggan umum"}
-                </p>
-                {infoTarget.customerEmail && (
-                  <p className="ts-xs text-text-muted">
-                    {infoTarget.customerEmail}
-                  </p>
-                )}
-              </section>
-              <section>
-                <p className="ts-xs text-text-muted">Status Resep</p>
-                <section className="mt-1">
-                  <StatusBadge
-                    label={PRESCRIPTION_STATUS_LABELS[infoTarget.prescriptionStatus]}
-                    tone={PRESCRIPTION_STATUS_TONES[infoTarget.prescriptionStatus]}
-                  />
-                </section>
-              </section>
-              <section>
-                <p className="ts-xs text-text-muted">Status Pesanan</p>
-                <section className="mt-1">
-                  <OrderStatusBadge status={infoTarget.orderStatus} />
-                </section>
-              </section>
-              <section>
-                <p className="ts-xs text-text-muted">Dikirim</p>
-                <p className="ts-sm text-text-default">
-                  {formatDateTime(infoTarget.submittedAt)}
-                </p>
-              </section>
-            </section>
-            <aside className="rounded-lg border border-border-default bg-muted-surface p-3">
-              <p className="ts-xs text-text-muted">
-                File resep disimpan secara aman dan tidak dapat diakses langsung
-                melalui tautan publik. Hubungi administrator untuk mengakses
-                file asli.
-              </p>
-            </aside>
-          </section>
-        )}
-      </Dialog>
 
       {/* Prescription review dialog */}
       <Dialog

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { createId } from "@paralleldrive/cuid2";
 import { parse as parseCsv } from "csv-parse/sync";
-import { and, asc, desc, eq, gte, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, lte, ne, sql } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import IORedis from "ioredis";
 
@@ -31,8 +31,8 @@ import {
   createQueueWorker,
   type QueueJobEnvelope,
 } from "@/lib/queue";
-import { putPrivateObject } from "@/lib/object-storage";
 import { InventoryWorkflowClient } from "@/client/inventory";
+import { generateReportPdf } from "@/client/report-pdf";
 
 type WorkerPayload = QueueJobEnvelope<Record<string, unknown>>;
 type ImportRecord = Record<string, string>;
@@ -134,51 +134,6 @@ async function markJobFailed(jobId: string | undefined, safeError: string) {
     .where(eq(jobRuns.id, jobId));
 }
 
-function escapePdfText(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
-function createSimplePdf(lines: string[]) {
-  const content = [
-    "BT",
-    "/F1 11 Tf",
-    "50 780 Td",
-    ...lines.flatMap((line, index) => [
-      index === 0 ? "" : "0 -16 Td",
-      `(${escapePdfText(line).slice(0, 110)}) Tj`,
-    ]),
-    "ET",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`,
-  ];
-
-  let body = "%PDF-1.4\n";
-  const offsets = [0];
-
-  objects.forEach((object, index) => {
-    offsets.push(Buffer.byteLength(body));
-    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  });
-
-  const xrefOffset = Buffer.byteLength(body);
-  body += `xref\n0 ${objects.length + 1}\n`;
-  body += "0000000000 65535 f \n";
-  offsets.slice(1).forEach((offset) => {
-    body += `${String(offset).padStart(10, "0")} 00000 n \n`;
-  });
-  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-
-  return Buffer.from(body);
-}
-
 async function processReportJob(payload: WorkerPayload) {
   await markJobProcessing(payload.jobId);
   const reportRunId = toText(payload.payload.reportRunId);
@@ -192,68 +147,24 @@ async function processReportJob(payload: WorkerPayload) {
 
     if (!report) throw new Error("Report run tidak ditemukan.");
 
-    const from = toText(report.filters.from);
-    const to = toText(report.filters.to);
-    const conditions = [
-      eq(payments.status, "PAID"),
-      ne(orders.status, "CANCELLED"),
-      ne(orders.status, "EXPIRED"),
-      ne(orders.status, "REFUNDED"),
-    ];
-
-    if (from) conditions.push(gte(orders.createdAt, new Date(from)));
-    if (to) conditions.push(lte(orders.createdAt, new Date(to)));
-
     await db
       .update(reportRuns)
-      .set({ progress: 25, startedAt: new Date(), status: "PROCESSING", updatedAt: new Date() })
+      .set({
+        progress: 25,
+        startedAt: new Date(),
+        status: "PROCESSING",
+        updatedAt: new Date(),
+      })
       .where(eq(reportRuns.id, report.id));
 
-    const rows = await db
-      .select({
-        createdAt: orders.createdAt,
-        grandTotal: orders.grandTotal,
-        orderNumber: orders.orderNumber,
-        paymentMethod: payments.method,
-        status: orders.status,
-      })
-      .from(orders)
-      .innerJoin(payments, eq(payments.orderId, orders.id))
-      .where(and(...conditions))
-      .orderBy(desc(orders.createdAt))
-      .limit(200);
-
-    const totalRevenue = rows.reduce(
-      (sum, row) => sum + Number(row.grandTotal),
-      0,
-    );
-    const generatedAt = new Date();
-    const lines = [
-      "Makmur Farma - Klinik Makmur Jaya",
-      `Laporan: ${report.type}`,
-      `Periode: ${from || "awal"} sampai ${to || "sekarang"}`,
-      `Dibuat: ${generatedAt.toISOString()}`,
-      `Total order dibayar: ${rows.length}`,
-      `Total revenue: Rp ${totalRevenue.toLocaleString("id-ID")}`,
-      "",
-      "Daftar transaksi:",
-      ...rows.slice(0, 35).map(
-        (row) =>
-          `${row.orderNumber} | ${row.createdAt.toISOString()} | ${row.paymentMethod} | Rp ${Number(row.grandTotal).toLocaleString("id-ID")}`,
-      ),
-      rows.length === 0 ? "Tidak ada transaksi pada periode ini." : "",
-    ];
-
-    const pdf = createSimplePdf(lines);
-    const relativeObjectKey = `private/reports/${report.id}.pdf`;
-    await putPrivateObject(relativeObjectKey, pdf, "application/pdf");
+    const { bytes } = await generateReportPdf(report.type, report.filters);
 
     await db
       .update(reportRuns)
       .set({
         completedAt: new Date(),
-        fileObjectKey: relativeObjectKey,
-        fileSizeBytes: pdf.byteLength,
+        fileObjectKey: null,
+        fileSizeBytes: bytes.byteLength,
         filename: `laporan-${report.type}-${report.id.slice(0, 8)}.pdf`,
         progress: 100,
         status: "COMPLETED",

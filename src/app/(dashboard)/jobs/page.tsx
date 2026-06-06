@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
   Card,
@@ -9,6 +10,7 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  Pagination,
   Progress,
   StatusBadge,
   TableBody,
@@ -42,25 +44,52 @@ type JobsResponse = {
     safeError: string | null;
     status: JobStatus;
   }>;
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
+const PAGE_SIZE = 30;
+
 export default function JobsPage() {
+  const [page, setPage] = useState(1);
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.jobs.get({
-        query: { limit: "30", page: "1", sortBy: "createdAt", sortDir: "desc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "createdAt",
+          sortDir: "desc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as JobsResponse;
     },
-    queryKey: ["jobs"],
+    queryKey: ["jobs", page],
   });
 
   return (
     <DataTableShell
       description="Job status disimpan di PostgreSQL agar retry, final failure, dan progres dapat diaudit."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} job ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Job"
     >
       {query.isError ? (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import {
   Card,
@@ -10,6 +11,7 @@ import {
   EmptyState,
   ErrorState,
   ImportStepper,
+  Pagination,
   Progress,
   StatusBadge,
   TableBody,
@@ -40,25 +42,47 @@ type ImportsResponse = {
     type: string;
     validRows: number;
   }>;
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
+const PAGE_SIZE = 30;
+
 export default function ImportsPage() {
+  const [page, setPage] = useState(1);
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.imports.get({
-        query: { limit: "30", page: "1" },
+        query: { limit: String(PAGE_SIZE), page: String(page) },
       });
 
       if (response.error) throw response.error;
 
       return response.data as ImportsResponse;
     },
-    queryKey: ["imports"],
+    queryKey: ["imports", page],
   });
 
   return (
     <DataTableShell
       description="Import CSV/Excel diproses bertahap: upload, mapping, validasi, konfirmasi, proses, hasil."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} import ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Import Obat"
       toolbar={
         <ImportStepper

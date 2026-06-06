@@ -17,6 +17,7 @@ export * from "./error-state";
 export * from "./field";
 export * from "./image-gallery";
 export * from "./import-stepper";
+export * from "./medicine-import-dialog";
 export * from "./monitoring-health-card";
 export * from "./pagination";
 export * from "./permission-state";

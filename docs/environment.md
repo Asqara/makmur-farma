@@ -67,7 +67,7 @@ Jika SMTP tidak dikonfigurasi di development, aplikasi menulis preview URL verif
 
 ## Object Storage
 
-Cloudflare R2 digunakan sebagai object storage S3-compatible untuk file privat seperti export laporan PDF. Jika variable belum lengkap di local demo, aplikasi fallback ke `.makmur-storage`.
+Cloudflare R2 digunakan sebagai object storage S3-compatible untuk file privat seperti resep dan objek upload lain. Export laporan PDF tidak lagi membutuhkan penyimpanan permanen: PDF dibuat di memori saat download dan metadata report tetap disimpan di database. Jika variable belum lengkap di local demo, aplikasi fallback ke `.makmur-storage` untuk objek privat yang memang perlu disimpan.
 
 ```text
 CLOUDFLARE_R2_ACCOUNT_ID

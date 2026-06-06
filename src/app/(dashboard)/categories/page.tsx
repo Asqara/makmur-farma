@@ -15,6 +15,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  Pagination,
   StatusBadge,
   TableBody,
   TableCell,
@@ -40,7 +41,13 @@ type CategoryRow = {
 
 type CategoryResponse = {
   data: CategoryRow[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+const PAGE_SIZE = 50;
 
 type CategoryDialogState =
   | { mode: "create" }
@@ -64,6 +71,7 @@ export default function CategoriesPage() {
 
   const [dialog, setDialog] = useState<CategoryDialogState>(null);
   const [toggleDialog, setToggleDialog] = useState<ToggleDialogState>(null);
+  const [page, setPage] = useState(1);
 
   // Form state for create/edit
   const [code, setCode] = useState("");
@@ -74,14 +82,19 @@ export default function CategoriesPage() {
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.categories.get({
-        query: { limit: "50", page: "1", sortBy: "name", sortDir: "asc" },
+        query: {
+          limit: String(PAGE_SIZE),
+          page: String(page),
+          sortBy: "name",
+          sortDir: "asc",
+        },
       });
 
       if (response.error) throw response.error;
 
       return response.data as CategoryResponse;
     },
-    queryKey: ["categories"],
+    queryKey: ["categories", page],
   });
 
   const createMutation = useMutation({
@@ -195,6 +208,20 @@ export default function CategoriesPage() {
     <>
       <DataTableShell
         description="Kategori membantu filter katalog dan laporan tanpa menduplikasi master obat."
+        footer={
+          query.data?.pagination ? (
+            <section className="flex flex-wrap items-center justify-between gap-3">
+              <p className="ts-sm text-text-muted">
+                {query.data.pagination.total} kategori ditemukan
+              </p>
+              <Pagination
+                currentPage={page}
+                onPageChange={setPage}
+                pageCount={Math.max(query.data.pagination.totalPages, 1)}
+              />
+            </section>
+          ) : null
+        }
         title="Kategori Obat"
         toolbar={
           <Button leftIcon={<Plus />} onClick={openCreate} size="sm">

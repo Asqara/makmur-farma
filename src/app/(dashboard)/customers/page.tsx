@@ -11,6 +11,7 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  Pagination,
   Skeleton,
   StatusBadge,
   TableBody,
@@ -35,7 +36,13 @@ type CustomersResponse = {
     phone: string | null;
     status: UserStatus;
   }>;
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
+const PAGE_SIZE = 30;
 
 const statusTone: Record<UserStatus, "danger" | "neutral" | "success" | "warning"> = {
   ACTIVE: "success",
@@ -47,12 +54,13 @@ const statusTone: Record<UserStatus, "danger" | "neutral" | "success" | "warning
 export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search.trim(), 300);
+  const [page, setPage] = useState(1);
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.customers.get({
         query: {
-          limit: "30",
-          page: "1",
+          limit: String(PAGE_SIZE),
+          page: String(page),
           search: debouncedSearch,
           sortBy: "createdAt",
           sortDir: "desc",
@@ -63,19 +71,36 @@ export default function CustomersPage() {
 
       return response.data as CustomersResponse;
     },
-    queryKey: ["customers", debouncedSearch],
+    queryKey: ["customers", debouncedSearch, page],
   });
 
   return (
     <DataTableShell
       description="Data pelanggan ditampilkan seperlunya. Email lengkap hanya tersedia pada detail untuk role yang berwenang."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} pelanggan ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Pelanggan"
       toolbar={
         <section className="grid gap-3 md:grid-cols-[minmax(0,320px)_auto] md:items-end">
           <TextInput
             id="customer-search"
             label="Cari Pelanggan"
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
             placeholder="Cari nama, email, atau telepon"
             value={search}
           />

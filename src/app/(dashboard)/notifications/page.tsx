@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCheck, Loader2 } from "lucide-react";
+import { useState } from "react";
 
 import {
   Button,
@@ -11,6 +12,7 @@ import {
   DataTableShell,
   EmptyState,
   ErrorState,
+  Pagination,
   StatusBadge,
   TableBody,
   TableCell,
@@ -35,6 +37,11 @@ type NotificationRow = {
 
 type NotificationsResponse = {
   data: NotificationRow[];
+  pagination: {
+    page: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 const severityTone = {
@@ -43,21 +50,23 @@ const severityTone = {
   success: "success",
   warning: "warning",
 } as const;
+const PAGE_SIZE = 30;
 
 export default function NotificationsPage() {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
 
   const query = useQuery({
     queryFn: async () => {
       const response = await eden.api.v1.notifications.get({
-        query: { limit: "30", page: "1" },
+        query: { limit: String(PAGE_SIZE), page: String(page) },
       });
 
       if (response.error) throw response.error;
 
       return response.data as NotificationsResponse;
     },
-    queryKey: ["notifications", "page"],
+    queryKey: ["notifications", "page", page],
   });
 
   const markReadMutation = useMutation({
@@ -99,6 +108,20 @@ export default function NotificationsPage() {
   return (
     <DataTableShell
       description="Notifikasi in-app menjadi baseline delivery; email hanya tambahan bila terkonfigurasi."
+      footer={
+        query.data?.pagination ? (
+          <section className="flex flex-wrap items-center justify-between gap-3">
+            <p className="ts-sm text-text-muted">
+              {query.data.pagination.total} notifikasi ditemukan
+            </p>
+            <Pagination
+              currentPage={page}
+              onPageChange={setPage}
+              pageCount={Math.max(query.data.pagination.totalPages, 1)}
+            />
+          </section>
+        ) : null
+      }
       title="Notifikasi"
       toolbar={
         hasUnread ? (

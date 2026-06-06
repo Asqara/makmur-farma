@@ -25,6 +25,7 @@ import {
 } from "@/drizzle-schema";
 import { db, readDb } from "@/lib/db";
 import { NotFoundAppError, ValidationAppError } from "@/lib/errors";
+import { getPrivateObject } from "@/lib/object-storage";
 import type { RequestContext } from "@/lib/request";
 import type { PrescriptionReviewInput } from "@/zod-schemas";
 
@@ -108,6 +109,23 @@ export type PrescriptionListItem = {
   originalFileName: string;
   status: PrescriptionStatus;
   submittedAt: Date;
+};
+
+export type PrescriptionDetail = PrescriptionListItem & {
+  contentType: string;
+  fileSizeBytes: number;
+  reviews: Array<{
+    approvedItems: Array<{ medicineId: string; quantity: number }>;
+    decision: PrescriptionStatus;
+    id: string;
+    notes: string;
+    pharmacist: {
+      email: string | null;
+      id: string;
+      name: string | null;
+    };
+    reviewedAt: Date;
+  }>;
 };
 
 export type TransitionOrderInput = {
@@ -490,6 +508,114 @@ export class OrdersClient {
         submittedAt: row.submittedAt,
       })),
       pagination: buildPagination(total, filters.page, filters.limit),
+    };
+  }
+
+  async getPrescriptionDetail(id: string): Promise<PrescriptionDetail> {
+    const [row] = await readDb
+      .select({
+        contentType: prescriptions.contentType,
+        createdAt: prescriptions.createdAt,
+        customerEmail: users.email,
+        customerId: users.id,
+        customerName: users.fullName,
+        fileSizeBytes: prescriptions.sizeBytes,
+        id: prescriptions.id,
+        latestNote: sql<string | null>`(
+          select pr.notes
+          from prescription_reviews pr
+          where pr.prescription_id = ${prescriptions.id}
+          order by pr.reviewed_at desc
+          limit 1
+        )`,
+        orderId: orders.id,
+        orderNumber: orders.orderNumber,
+        orderStatus: orders.status,
+        originalFileName: prescriptions.originalFileName,
+        status: prescriptions.status,
+        submittedAt: prescriptions.submittedAt,
+      })
+      .from(prescriptions)
+      .innerJoin(orders, eq(prescriptions.orderId, orders.id))
+      .innerJoin(users, eq(prescriptions.customerUserId, users.id))
+      .where(eq(prescriptions.id, id))
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundAppError("Resep tidak ditemukan.");
+    }
+
+    const reviews = await readDb
+      .select({
+        approvedItems: prescriptionReviews.approvedItems,
+        decision: prescriptionReviews.decision,
+        email: users.email,
+        id: prescriptionReviews.id,
+        notes: prescriptionReviews.notes,
+        pharmacistId: users.id,
+        pharmacistName: users.fullName,
+        reviewedAt: prescriptionReviews.reviewedAt,
+      })
+      .from(prescriptionReviews)
+      .innerJoin(users, eq(prescriptionReviews.pharmacistUserId, users.id))
+      .where(eq(prescriptionReviews.prescriptionId, id))
+      .orderBy(desc(prescriptionReviews.reviewedAt));
+
+    return {
+      contentType: row.contentType,
+      createdAt: row.createdAt,
+      customer: {
+        email: row.customerEmail ?? null,
+        id: row.customerId,
+        name: row.customerName ?? null,
+      },
+      fileSizeBytes: row.fileSizeBytes,
+      id: row.id,
+      latestNote: row.latestNote ?? null,
+      order: {
+        id: row.orderId,
+        orderNumber: row.orderNumber,
+        status: row.orderStatus,
+      },
+      originalFileName: row.originalFileName,
+      reviews: reviews.map((review) => ({
+        approvedItems: review.approvedItems,
+        decision: review.decision,
+        id: review.id,
+        notes: review.notes,
+        pharmacist: {
+          email: review.email ?? null,
+          id: review.pharmacistId,
+          name: review.pharmacistName ?? null,
+        },
+        reviewedAt: review.reviewedAt,
+      })),
+      status: row.status,
+      submittedAt: row.submittedAt,
+    };
+  }
+
+  async getPrescriptionFile(id: string) {
+    const [row] = await readDb
+      .select({
+        contentType: prescriptions.contentType,
+        fileName: prescriptions.originalFileName,
+        objectKey: prescriptions.originalObjectKey,
+      })
+      .from(prescriptions)
+      .where(eq(prescriptions.id, id))
+      .limit(1);
+
+    if (!row) {
+      throw new NotFoundAppError("Resep tidak ditemukan.");
+    }
+
+    const file = await getPrivateObject(row.objectKey);
+
+    return {
+      bytes: file.bytes,
+      contentType: row.contentType || file.contentType,
+      filename: row.fileName,
     };
   }
 

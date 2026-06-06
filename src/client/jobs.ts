@@ -95,6 +95,15 @@ type ErrorMutationActor = {
   requestContext: RequestContext;
 };
 
+type SystemErrorInput = {
+  correlationId: string;
+  diagnosticDetail?: string | null;
+  safeMessage: string;
+  severity: ApplicationErrorListItem["severity"];
+  source: string;
+  userId?: string | null;
+};
+
 /**
  * Background job and monitoring query service.
  */
@@ -284,6 +293,21 @@ export class JobsClient {
       workerMetric = "Gagal memeriksa worker";
     }
 
+    if (!workerHeartbeat?.timestamp && workerStatus === "unknown") {
+      const waitingCount = queueRows.reduce((sum, row) => sum + row.waiting, 0);
+      const activeCount = queueRows.reduce((sum, row) => sum + row.active, 0);
+
+      if (waitingCount > 0 || activeCount > 0) {
+        workerStatus = "degraded";
+        workerMetric = `${waitingCount + activeCount} job menunggu worker`;
+      } else {
+        workerStatus = "healthy";
+        workerMetric = ENV.redisUrl
+          ? "Tidak ada job tertahan; heartbeat belum ada"
+          : "Tidak ada job tertahan; Redis belum dikonfigurasi";
+      }
+    }
+
     const criticalErrors = Number(errorRows[0]?.critical ?? 0);
 
     return {
@@ -309,7 +333,7 @@ export class JobsClient {
           status: redisStatus,
         },
         {
-          description: "Dilihat dari job PROCESSING yang terkunci >10 menit.",
+          description: "Dilihat dari heartbeat Redis dan status job di PostgreSQL.",
           lastChecked: checkedAt,
           metric: workerMetric,
           serviceName: "Worker",
@@ -433,6 +457,41 @@ export class JobsClient {
       });
     } catch (err) {
       console.error("[recordError] Gagal menyimpan application error ke database:", err);
+      return null;
+    }
+  }
+
+  async recordSystemError(input: SystemErrorInput) {
+    try {
+      return await db.transaction(async (tx) => {
+        const [error] = await tx
+          .insert(applicationErrors)
+          .values({
+            correlationId: input.correlationId,
+            diagnosticDetail: input.diagnosticDetail ?? null,
+            safeMessage: input.safeMessage,
+            severity: input.severity,
+            source: input.source,
+            userId: input.userId ?? null,
+          })
+          .returning();
+
+        if (input.severity !== "info") {
+          await tx.insert(notifications).values({
+            actionHref: "/error-logs",
+            dedupeKey: `application-error:${error.id}:admin`,
+            message: input.safeMessage,
+            roleTarget: "ADMIN",
+            severity: input.severity,
+            title: "Application Error",
+            type: "APPLICATION_ERROR",
+          });
+        }
+
+        return error;
+      });
+    } catch (err) {
+      console.error("[recordSystemError] Gagal menyimpan application error:", err);
       return null;
     }
   }

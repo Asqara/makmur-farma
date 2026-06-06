@@ -62,7 +62,7 @@ function getMutationActor(
  * Versioned application API.
  */
 export const v1Api = new Elysia()
-  .group("/api/v1/auth", (app) =>
+  .group("/api/v1/auth", { detail: { tags: ["Authentication"] } }, (app) =>
     app
       .post("/register", async ({ body, request }) => {
         assertSafeMutationOrigin(request);
@@ -96,14 +96,6 @@ export const v1Api = new Elysia()
       )
       .post("/logout", async ({ request, set }) => {
         const requestContext = getRequestContext(request);
-        const activeSession = await client.auth
-          .validateRequestSession(request, requestContext)
-          .catch(() => null);
-
-        if (activeSession) {
-          assertSessionCsrf(request, activeSession.csrfTokenHash);
-        }
-
         const result = await client.auth.logout(request, requestContext);
 
         setCookieHeaders(set, createClearAuthCookies());
@@ -136,7 +128,7 @@ export const v1Api = new Elysia()
 
     return client.dashboard.getOverview(query as Record<string, unknown>);
   })
-  .group("/api/v1/catalog", (app) =>
+  .group("/api/v1/catalog", { detail: { tags: ["Catalog"] } }, (app) =>
     app
       .get("/medicines", async ({ query }) =>
         client.medicines.listMedicines({
@@ -154,540 +146,646 @@ export const v1Api = new Elysia()
         }),
       ),
   )
-  .get("/api/v1/medicines", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "medicine.read");
+  .guard({ detail: { tags: ["Medicines"] } }, (app) =>
+    app
+      .get("/api/v1/medicines", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "medicine.read");
 
-    return client.medicines.listMedicines(query as Record<string, unknown>);
-  })
-  .post("/api/v1/medicines", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "medicine.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.medicines.listMedicines(query as Record<string, unknown>);
+      })
+      .post("/api/v1/medicines", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "medicine.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    return client.medicines.createMedicine(
-      parseBody(MasterData.medicineCreate, body),
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/medicines/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "medicine.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.createMedicine(
+          parseBody(MasterData.medicineCreate, body),
+          getMutationActor(session, request),
+        );
+      })
+      .get("/api/v1/medicines/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "medicine.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.getMedicine(parsedParams.id);
-  })
-  .put("/api/v1/medicines/:id", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "medicine.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.getMedicine(parsedParams.id);
+      })
+      .put("/api/v1/medicines/:id", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "medicine.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.updateMedicine(
-      parsedParams.id,
-      parseBody(MasterData.medicineUpdate, body),
-      getMutationActor(session, request),
-    );
-  })
-  .delete("/api/v1/medicines/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "medicine.delete");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.updateMedicine(
+          parsedParams.id,
+          parseBody(MasterData.medicineUpdate, body),
+          getMutationActor(session, request),
+        );
+      })
+      .delete("/api/v1/medicines/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "medicine.delete");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.deactivateMedicine(
-      parsedParams.id,
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/categories", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "category.read");
+        return client.medicines.deactivateMedicine(
+          parsedParams.id,
+          getMutationActor(session, request),
+        );
+      }),
+  )
+  .guard({ detail: { tags: ["Categories"] } }, (app) =>
+    app
+      .get("/api/v1/categories", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "category.read");
 
-    return client.medicines.listCategories(query as Record<string, unknown>);
-  })
-  .post("/api/v1/categories", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "category.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.medicines.listCategories(query as Record<string, unknown>);
+      })
+      .post("/api/v1/categories", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "category.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    return client.medicines.createCategory(
-      parseBody(MasterData.categoryCreate, body),
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/categories/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "category.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.createCategory(
+          parseBody(MasterData.categoryCreate, body),
+          getMutationActor(session, request),
+        );
+      })
+      .get("/api/v1/categories/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "category.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.getCategory(parsedParams.id);
-  })
-  .put("/api/v1/categories/:id", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "category.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.getCategory(parsedParams.id);
+      })
+      .put("/api/v1/categories/:id", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "category.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.updateCategory(
-      parsedParams.id,
-      parseBody(MasterData.categoryUpdate, body),
-      getMutationActor(session, request),
-    );
-  })
-  .delete("/api/v1/categories/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "category.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.updateCategory(
+          parsedParams.id,
+          parseBody(MasterData.categoryUpdate, body),
+          getMutationActor(session, request),
+        );
+      })
+      .delete("/api/v1/categories/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "category.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.deactivateCategory(
-      parsedParams.id,
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/suppliers", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "supplier.read");
+        return client.medicines.deactivateCategory(
+          parsedParams.id,
+          getMutationActor(session, request),
+        );
+      }),
+  )
+  .guard({ detail: { tags: ["Suppliers"] } }, (app) =>
+    app
+      .get("/api/v1/suppliers", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "supplier.read");
 
-    return client.medicines.listSuppliers(query as Record<string, unknown>);
-  })
-  .post("/api/v1/suppliers", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "supplier.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.medicines.listSuppliers(query as Record<string, unknown>);
+      })
+      .post("/api/v1/suppliers", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "supplier.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    return client.medicines.createSupplier(
-      parseBody(MasterData.supplierCreate, body),
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/suppliers/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "supplier.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.createSupplier(
+          parseBody(MasterData.supplierCreate, body),
+          getMutationActor(session, request),
+        );
+      })
+      .get("/api/v1/suppliers/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "supplier.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.getSupplier(parsedParams.id);
-  })
-  .put("/api/v1/suppliers/:id", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "supplier.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.getSupplier(parsedParams.id);
+      })
+      .put("/api/v1/suppliers/:id", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "supplier.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.updateSupplier(
-      parsedParams.id,
-      parseBody(MasterData.supplierUpdate, body),
-      getMutationActor(session, request),
-    );
-  })
-  .delete("/api/v1/suppliers/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "supplier.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.updateSupplier(
+          parsedParams.id,
+          parseBody(MasterData.supplierUpdate, body),
+          getMutationActor(session, request),
+        );
+      })
+      .delete("/api/v1/suppliers/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "supplier.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.deactivateSupplier(
-      parsedParams.id,
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/customers", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "customer.read");
+        return client.medicines.deactivateSupplier(
+          parsedParams.id,
+          getMutationActor(session, request),
+        );
+      }),
+  )
+  .guard({ detail: { tags: ["Users"] } }, (app) =>
+    app
+      .get("/api/v1/customers", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "customer.read");
 
-    return client.customers.list(query as Record<string, unknown>);
-  })
-  .get("/api/v1/customers/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "customer.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.customers.list(query as Record<string, unknown>);
+      })
+      .get("/api/v1/customers/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "customer.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.customers.get(parsedParams.id);
-  })
-  .get("/api/v1/users", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "user.read");
-    requireRole(session, ["ADMIN"]);
+        return client.customers.get(parsedParams.id);
+      }),
+  )
+  .guard({ detail: { tags: ["Users"] } }, (app) =>
+    app
+      .get("/api/v1/users", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "user.read");
+        requireRole(session, ["ADMIN"]);
 
-    return client.users.list(query as Record<string, unknown>);
-  })
-  .post("/api/v1/users", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "user.write");
-    requireRole(session, ["ADMIN"]);
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.users.list(query as Record<string, unknown>);
+      })
+      .post("/api/v1/users", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "user.write");
+        requireRole(session, ["ADMIN"]);
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    return client.users.create(
-      parseBody(Users.create, body),
-      getMutationActor(session, request),
-    );
-  })
-  .put("/api/v1/users/:id", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "user.write");
-    requireRole(session, ["ADMIN"]);
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.users.create(
+          parseBody(Users.create, body),
+          getMutationActor(session, request),
+        );
+      })
+      .put("/api/v1/users/:id", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "user.write");
+        requireRole(session, ["ADMIN"]);
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.users.update(
-      parsedParams.id,
-      parseBody(Users.update, body),
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/batches", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "batch.read");
+        return client.users.update(
+          parsedParams.id,
+          parseBody(Users.update, body),
+          getMutationActor(session, request),
+        );
+      }),
+  )
+  .guard({ detail: { tags: ["Inventory"] } }, (app) =>
+    app
+      .get("/api/v1/batches", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "batch.read");
 
-    return client.medicines.listBatches(query as Record<string, unknown>);
-  })
-  .get("/api/v1/inventory/stock-sync", async ({ request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "batch.read");
+        return client.medicines.listBatches(query as Record<string, unknown>);
+      })
+      .get("/api/v1/inventory/stock-sync", async ({ request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "batch.read");
 
-    return client.inventory.getStockSyncWatermark();
-  })
-  .post("/api/v1/batches", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "batch.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.inventory.getStockSyncWatermark();
+      })
+      .post("/api/v1/batches", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "batch.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    return client.medicines.createStockReceipt(
-      parseBody(Inventory.stockReceipt, body),
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/batches/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "batch.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.medicines.createStockReceipt(
+          parseBody(Inventory.stockReceipt, body),
+          getMutationActor(session, request),
+        );
+      })
+      .get("/api/v1/batches/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "batch.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.medicines.getBatch(parsedParams.id);
-  })
-  .post("/api/v1/batches/:id/adjust", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "stock_adjustment.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
-    const input = parseBody(Inventory.stockAdjustment, body);
+        return client.medicines.getBatch(parsedParams.id);
+      })
+      .post("/api/v1/batches/:id/adjust", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "stock_adjustment.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const input = parseBody(Inventory.stockAdjustment, body);
 
-    return client.medicines.adjustStock(
-      { ...input, batchId: parsedParams.id },
-      getMutationActor(session, request),
-    );
-  })
-  .post("/api/v1/batches/:id/block", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "batch.write");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
-    const input = parseBody(Inventory.blockBatch, body);
+        return client.medicines.adjustStock(
+          { ...input, batchId: parsedParams.id },
+          getMutationActor(session, request),
+        );
+      })
+      .post("/api/v1/batches/:id/block", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "batch.write");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const input = parseBody(Inventory.blockBatch, body);
 
-    return client.medicines.blockBatch(
-      parsedParams.id,
-      input.reason,
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/stock-movements", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "stock_movement.read");
+        return client.medicines.blockBatch(
+          parsedParams.id,
+          input.reason,
+          getMutationActor(session, request),
+        );
+      })
+      .get("/api/v1/stock-movements", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "stock_movement.read");
 
-    return client.medicines.listStockMovements(query as Record<string, unknown>);
-  })
-  .get("/api/v1/orders", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "order.read");
+        return client.medicines.listStockMovements(query as Record<string, unknown>);
+      }),
+  )
+  .guard({ detail: { tags: ["Orders"] } }, (app) =>
+    app
+      .get("/api/v1/orders", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "order.read");
 
-    return client.orders.listOrders(query as Record<string, unknown>);
-  })
-  .get("/api/v1/orders/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "order.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.orders.listOrders(query as Record<string, unknown>);
+      })
+      .get("/api/v1/orders/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "order.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.orders.getOrderDetail(parsedParams.id);
-  })
-  .post("/api/v1/orders/:id/transition", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "order.process");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.orders.getOrderDetail(parsedParams.id);
+      })
+      .post("/api/v1/orders/:id/transition", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "order.process");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    const input = parseBody(Orders.transition, body);
+        const input = parseBody(Orders.transition, body);
 
-    return client.orders.transitionOrder({
-      actorRole: session.user.role,
-      actorUserId: session.userId,
-      nextStatus: input.nextStatus,
-      note: input.note,
-      orderId: params.id,
-      requestContext: getRequestContext(request),
-    });
-  })
-  .get("/api/v1/payments", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "payment.read");
+        return client.orders.transitionOrder({
+          actorRole: session.user.role,
+          actorUserId: session.userId,
+          nextStatus: input.nextStatus,
+          note: input.note,
+          orderId: params.id,
+          requestContext: getRequestContext(request),
+        });
+      }),
+  )
+  .guard({ detail: { tags: ["Payments"] } }, (app) =>
+    app
+      .get("/api/v1/payments", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "payment.read");
 
-    return client.orders.listPayments(query as Record<string, unknown>);
-  })
-  .get("/api/v1/payments/:id", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "payment.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.orders.listPayments(query as Record<string, unknown>);
+      })
+      .get("/api/v1/payments/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        if (session.user.role !== "CUSTOMER") {
+          requirePermission(session, "payment.read");
+        }
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.qrisSimulator.getPaymentDetail(parsedParams.id);
-  })
-  .post("/api/v1/payments/:id/initialize-qris", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "payment.read");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
-    const input = parseBody(Payments.initializeQris, body ?? {});
+        return client.qrisSimulator.getPaymentDetail(parsedParams.id, {
+          role: session.user.role,
+          userId: session.userId,
+        });
+      })
+      .post("/api/v1/payments/:id/initialize-qris", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        if (session.user.role !== "CUSTOMER") {
+          requirePermission(session, "payment.read");
+        }
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const input = parseBody(Payments.initializeQris, body ?? {});
 
-    return client.qrisSimulator.initializeQrisPayment(parsedParams.id, input.amount);
-  })
-  .post("/api/v1/payments/:id/override", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "payment.process");
-    requireRole(session, ["ADMIN"]);
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
-    const input = parseBody(Payments.override, body);
+        return client.qrisSimulator.initializeQrisPayment(
+          parsedParams.id,
+          input.amount,
+          {
+            role: session.user.role,
+            userId: session.userId,
+          },
+        );
+      })
+      .post("/api/v1/payments/:id/override", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "payment.process");
+        requireRole(session, ["ADMIN"]);
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const input = parseBody(Payments.override, body);
 
-    return client.orders.adminOverridePayment(
-      parsedParams.id,
-      input.overrideStatus,
-      input.reason,
-      session.userId,
-    );
-  })
-  .post("/api/v1/payments/:id/simulate", async ({ body, params, request }) => {
-    if (!ENV.enablePaymentSimulator) {
-      throw new ForbiddenError("Simulator pembayaran tidak aktif.");
-    }
+        return client.orders.adminOverridePayment(
+          parsedParams.id,
+          input.overrideStatus,
+          input.reason,
+          session.userId,
+        );
+      })
+      .post("/api/v1/payments/:id/simulate", async ({ body, params, request }) => {
+        if (!ENV.enablePaymentSimulator) {
+          throw new ForbiddenError("Simulator pembayaran tidak aktif.");
+        }
 
-    const session = await requireSession(request);
-    requirePermission(session, "payment.read");
-    requireRole(session, ["ADMIN", "CASHIER"]);
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
-    const input = parseBody(Payments.simulateCallback, body);
+        const session = await requireSession(request);
+        if (session.user.role === "CUSTOMER") {
+          requireRole(session, ["CUSTOMER"]);
+        } else {
+          requirePermission(session, "payment.read");
+          requireRole(session, ["ADMIN", "CASHIER"]);
+        }
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const input = parseBody(Payments.simulateCallback, body);
 
-    await client.qrisSimulator.simulateCallback(
-      parsedParams.id,
-      input.outcome,
-      getMutationActor(session, request),
-    );
+        await client.qrisSimulator.simulateCallback(
+          parsedParams.id,
+          input.outcome,
+          getMutationActor(session, request),
+        );
 
-    return { ok: true };
-  })
-  .get("/api/v1/prescriptions", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "prescription.read");
+        return { ok: true };
+      }),
+  )
+  .guard({ detail: { tags: ["Prescriptions"] } }, (app) =>
+    app
+      .get("/api/v1/prescriptions", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "prescription.read");
 
-    return client.orders.listPrescriptions(query as Record<string, unknown>);
-  })
-  .post("/api/v1/prescriptions/:id/review", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "prescription.verify");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.orders.listPrescriptions(query as Record<string, unknown>);
+      })
+      .get("/api/v1/prescriptions/:id", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "prescription.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return client.orders.reviewPrescription({
-      ...getMutationActor(session, request),
-      input: parseBody(Prescriptions.review, body),
-      prescriptionId: parsedParams.id,
-    });
-  })
-  .get("/api/v1/notifications", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "notification.read");
+        return client.orders.getPrescriptionDetail(parsedParams.id);
+      })
+      .get("/api/v1/prescriptions/:id/file", async ({ params, request, set }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "prescription.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const file = await client.orders.getPrescriptionFile(parsedParams.id);
 
-    return client.notifications.list(query as Record<string, unknown>, {
-      role: session.user.role,
-      userId: session.userId,
-    });
-  })
-  .get("/api/v1/notifications/unread-count", async ({ request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "notification.read");
+        set.headers["Content-Type"] = file.contentType;
+        set.headers["Content-Disposition"] = `inline; filename="${file.filename}"`;
 
-    const count = await client.notifications.getUnreadCount({
-      role: session.user.role,
-      userId: session.userId,
-    });
+        return Buffer.from(file.bytes);
+      })
+      .post("/api/v1/prescriptions/:id/review", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "prescription.verify");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
 
-    return { count };
-  })
-  .post("/api/v1/notifications/:id/read", async ({ params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "notification.read");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(Notifications.markReadParams, params);
+        return client.orders.reviewPrescription({
+          ...getMutationActor(session, request),
+          input: parseBody(Prescriptions.review, body),
+          prescriptionId: parsedParams.id,
+        });
+      }),
+  )
+  .guard({ detail: { tags: ["Notifications"] } }, (app) =>
+    app
+      .get("/api/v1/notifications", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "notification.read");
 
-    return client.notifications.markRead(parsedParams.id, {
-      role: session.user.role,
-      userId: session.userId,
-    });
-  })
-  .post("/api/v1/notifications/read-all", async ({ request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "notification.read");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        return client.notifications.list(query as Record<string, unknown>, {
+          role: session.user.role,
+          userId: session.userId,
+        });
+      })
+      .get("/api/v1/notifications/unread-count", async ({ request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "notification.read");
 
-    return client.notifications.markAllRead(
-      {
-        role: session.user.role,
-        userId: session.userId,
-      },
-      {
-        requestContext: getRequestContext(request),
-        role: session.user.role,
-        userId: session.userId,
-      },
-    );
-  })
-  .post("/api/v1/notifications/scan-inventory", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "notification.read");
-    requirePermission(session, "batch.read");
-    requireRole(session, ["ADMIN", "PHARMACIST"]);
-    assertSessionCsrf(request, session.csrfTokenHash);
+        const count = await client.notifications.getUnreadCount({
+          role: session.user.role,
+          userId: session.userId,
+        });
 
-    return client.notifications.scanInventoryAlerts(
-      parseBody(Notifications.scanAlerts, body ?? {}),
-      {
-        requestContext: getRequestContext(request),
-        role: session.user.role,
-        userId: session.userId,
-      },
-    );
-  })
-  .get("/api/v1/reports", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "report.read");
+        return { count };
+      })
+      .post("/api/v1/notifications/:id/read", async ({ params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "notification.read");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(Notifications.markReadParams, params);
 
-    return client.reports.list(query as Record<string, unknown>);
-  })
-  .get("/api/v1/reports/:id/download", async ({ params, request, set }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "report.read");
-    const parsedParams = parseBody(MasterData.idParams, params);
-    const file = await client.reports.getDownload(parsedParams.id);
+        return client.notifications.markRead(parsedParams.id, {
+          role: session.user.role,
+          userId: session.userId,
+        });
+      })
+      .post("/api/v1/notifications/read-all", async ({ request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "notification.read");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    set.headers["Content-Type"] = file.contentType || "application/pdf";
-    set.headers["Content-Disposition"] = `attachment; filename="${file.filename}"`;
+        return client.notifications.markAllRead(
+          {
+            role: session.user.role,
+            userId: session.userId,
+          },
+          {
+            requestContext: getRequestContext(request),
+            role: session.user.role,
+            userId: session.userId,
+          },
+        );
+      })
+      .post("/api/v1/notifications/scan-inventory", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "notification.read");
+        requirePermission(session, "batch.read");
+        requireRole(session, ["ADMIN", "PHARMACIST"]);
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    const body = new Uint8Array(file.bytes.byteLength);
-    body.set(file.bytes);
+        return client.notifications.scanInventoryAlerts(
+          parseBody(Notifications.scanAlerts, body ?? {}),
+          {
+            requestContext: getRequestContext(request),
+            role: session.user.role,
+            userId: session.userId,
+          },
+        );
+      }),
+  )
+  .guard({ detail: { tags: ["Reports"] } }, (app) =>
+    app
+      .get("/api/v1/reports", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "report.read");
 
-    return new Response(body.buffer);
-  })
-  .post("/api/v1/reports", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "report.generate");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const input = parseBody(Reports.request, body);
+        return client.reports.list(query as Record<string, unknown>);
+      })
+      .get("/api/v1/reports/:id/download", async ({ params, request, set }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "report.read");
+        const parsedParams = parseBody(MasterData.idParams, params);
+        const file = await client.reports.getDownload(parsedParams.id);
 
-    return client.reports.requestReport({
-      actorRole: session.user.role,
-      filters: input.filters,
-      requesterUserId: session.userId,
-      requestContext: getRequestContext(request),
-      type: input.type,
-    });
-  })
-  .get("/api/v1/imports", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "import.read");
+        set.headers["Content-Type"] = file.contentType || "application/pdf";
+        set.headers["Content-Disposition"] = `attachment; filename="${file.filename}"`;
 
-    return client.imports.list(query as Record<string, unknown>);
-  })
-  .post("/api/v1/imports", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "import.run");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const input = parseBody(Imports.request, body);
+        return Buffer.from(file.bytes);
+      })
+      .post("/api/v1/reports", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "report.generate");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const input = parseBody(Reports.request, body);
 
-    return client.imports.requestImport({
-      actorRole: session.user.role,
-      fileSizeBytes: input.fileSizeBytes,
-      mapping: input.mapping,
-      originalFileName: input.originalFileName,
-      requesterUserId: session.userId,
-      requestContext: getRequestContext(request),
-      sourceFileObjectKey: input.sourceFileObjectKey,
-      type: input.type,
-    });
-  })
-  .get("/api/v1/imports/:id/rows", async ({ params, request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "import.read");
+        return client.reports.requestReport({
+          actorRole: session.user.role,
+          filters: input.filters,
+          requesterUserId: session.userId,
+          requestContext: getRequestContext(request),
+          type: input.type,
+        });
+      }),
+  )
+  .guard({ detail: { tags: ["Imports"] } }, (app) =>
+    app
+      .post("/api/v1/imports/upload", async ({ request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "import.run");
+        assertSessionCsrf(request, session.csrfTokenHash);
 
-    return client.imports.listRows(params.id, query as Record<string, unknown>);
-  })
-  .get("/api/v1/jobs", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "monitoring.read");
+        const formData = await request.formData();
+        const file = formData.get("file");
 
-    return client.jobs.list(query as Record<string, unknown>);
-  })
-  .get("/api/v1/error-logs", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "error_log.read");
+        if (!(file instanceof File)) {
+          throw new ValidationAppError("File wajib diunggah.");
+        }
 
-    return client.jobs.listErrors(query as Record<string, unknown>);
-  })
-  .post("/api/v1/error-logs", async ({ body, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "error_log.read");
-    assertSessionCsrf(request, session.csrfTokenHash);
+        const bytes = Buffer.from(await file.arrayBuffer());
 
-    return client.jobs.recordError(
-      parseBody(ErrorLogs.record, body),
-      getMutationActor(session, request),
-    );
-  })
-  .post("/api/v1/error-logs/:id/resolve", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "error_log.read");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        return client.imports.uploadFile({
+          bytes,
+          contentType: file.type || "application/octet-stream",
+          fileName: file.name || "import",
+          sizeBytes: file.size,
+        });
+      })
+      .get("/api/v1/imports/template", async ({ request, set }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "import.run");
 
-    return client.jobs.resolveError(
-      parsedParams.id,
-      parseBody(ErrorLogs.resolution, body),
-      getMutationActor(session, request),
-    );
-  })
-  .post("/api/v1/error-logs/:id/ignore", async ({ body, params, request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "error_log.read");
-    assertSessionCsrf(request, session.csrfTokenHash);
-    const parsedParams = parseBody(MasterData.idParams, params);
+        const buffer = await client.imports.generateTemplate();
 
-    return client.jobs.ignoreError(
-      parsedParams.id,
-      parseBody(ErrorLogs.resolution, body),
-      getMutationActor(session, request),
-    );
-  })
-  .get("/api/v1/monitoring", async ({ request }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "monitoring.read");
+        set.headers["Content-Type"] =
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        set.headers["Content-Disposition"] =
+          'attachment; filename="template-import-obat.xlsx"';
 
-    return client.jobs.getMonitoringOverview();
-  })
-  .get("/api/v1/audit-logs", async ({ request, query }) => {
-    const session = await requireSession(request);
-    requirePermission(session, "audit_log.read");
+        return buffer;
+      })
+      .get("/api/v1/imports", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "import.read");
 
-    return client.auditLogs.list(query as Record<string, unknown>);
-  })
+        return client.imports.list(query as Record<string, unknown>);
+      })
+      .post("/api/v1/imports", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "import.run");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const input = parseBody(Imports.request, body);
+
+        return client.imports.requestImport({
+          actorRole: session.user.role,
+          fileSizeBytes: input.fileSizeBytes,
+          mapping: input.mapping,
+          originalFileName: input.originalFileName,
+          requesterUserId: session.userId,
+          requestContext: getRequestContext(request),
+          sourceFileObjectKey: input.sourceFileObjectKey,
+          type: input.type,
+        });
+      })
+      .get("/api/v1/imports/:id/rows", async ({ params, request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "import.read");
+
+        return client.imports.listRows(params.id, query as Record<string, unknown>);
+      }),
+  )
+  .guard({ detail: { tags: ["Monitoring"] } }, (app) =>
+    app
+      .get("/api/v1/jobs", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "monitoring.read");
+
+        return client.jobs.list(query as Record<string, unknown>);
+      })
+      .get("/api/v1/error-logs", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "error_log.read");
+
+        return client.jobs.listErrors(query as Record<string, unknown>);
+      })
+      .post("/api/v1/error-logs", async ({ body, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "error_log.read");
+        assertSessionCsrf(request, session.csrfTokenHash);
+
+        return client.jobs.recordError(
+          parseBody(ErrorLogs.record, body),
+          getMutationActor(session, request),
+        );
+      })
+      .post("/api/v1/error-logs/:id/resolve", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "error_log.read");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+
+        return client.jobs.resolveError(
+          parsedParams.id,
+          parseBody(ErrorLogs.resolution, body),
+          getMutationActor(session, request),
+        );
+      })
+      .post("/api/v1/error-logs/:id/ignore", async ({ body, params, request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "error_log.read");
+        assertSessionCsrf(request, session.csrfTokenHash);
+        const parsedParams = parseBody(MasterData.idParams, params);
+
+        return client.jobs.ignoreError(
+          parsedParams.id,
+          parseBody(ErrorLogs.resolution, body),
+          getMutationActor(session, request),
+        );
+      })
+      .get("/api/v1/monitoring", async ({ request }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "monitoring.read");
+
+        return client.jobs.getMonitoringOverview();
+      })
+      .get("/api/v1/audit-logs", async ({ request, query }) => {
+        const session = await requireSession(request);
+        requirePermission(session, "audit_log.read");
+
+        return client.auditLogs.list(query as Record<string, unknown>);
+      }),
+  )
   .get("/api/v1/account/orders", async ({ request, query }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
 
     const result = await client.orders.listOrders({
       ...(query as Record<string, unknown>),
@@ -719,7 +817,7 @@ export const v1Api = new Elysia()
   })
   .get("/api/v1/account/prescriptions", async ({ request, query }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
 
     return client.orders.listPrescriptions({
       ...(query as Record<string, unknown>),
@@ -728,13 +826,13 @@ export const v1Api = new Elysia()
   })
   .get("/api/v1/cart", async ({ request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
 
     return client.cart.getCart(session.userId);
   })
   .post("/api/v1/cart/items", async ({ body, request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
 
     const input = parseBody(Cart.addItem, body);
@@ -743,7 +841,7 @@ export const v1Api = new Elysia()
   })
   .put("/api/v1/cart/items/:itemId", async ({ body, params, request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
 
     const parsedParams = parseBody(Cart.itemParams, params);
@@ -753,7 +851,7 @@ export const v1Api = new Elysia()
   })
   .delete("/api/v1/cart/items/:itemId", async ({ params, request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
 
     const parsedParams = parseBody(Cart.itemParams, params);
@@ -762,14 +860,14 @@ export const v1Api = new Elysia()
   })
   .delete("/api/v1/cart", async ({ request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
 
     return client.cart.clearCart(session.userId);
   })
   .post("/api/v1/checkout", async ({ body, request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
 
     const input = parseBody(Cart.checkout, body);
@@ -783,7 +881,7 @@ export const v1Api = new Elysia()
   })
   .post("/api/v1/orders/:id/prescription", async ({ params, request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
     const parsedParams = parseBody(MasterData.idParams, params);
     const formData = await request.formData();
@@ -815,7 +913,7 @@ export const v1Api = new Elysia()
   })
   .post("/api/v1/cart/merge", async ({ body, request }) => {
     const session = await requireSession(request);
-    requireRole(session, ["CUSTOMER"]);
+    requireRole(session, ["CUSTOMER","ADMIN","CASHIER","PHARMACIST"]);
     assertSessionCsrf(request, session.csrfTokenHash);
 
     const input = parseBody(Cart.merge, body);

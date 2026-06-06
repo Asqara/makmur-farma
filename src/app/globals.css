@@ -322,6 +322,25 @@
     outline: 2px solid var(--color-primary-blue);
     outline-offset: 2px;
   }
+  
+   
+
+    *::-webkit-scrollbar {
+        width: 2px;
+        height: 4px;
+    }
+
+    *::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+        @apply bg-[#5374c7] rounded-full;
+    }
+    .dark *::-webkit-scrollbar-thumb {
+        @apply bg-white;
+    }
+
 }
 
 /* ---------------------------------------------------------------------------
